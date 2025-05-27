@@ -55,27 +55,34 @@
       background-color: #ccc;
       cursor: default;
     }
-    #lockBtn {
+    button {
       padding: 10px 20px;
       font-size: 16px;
-      background-color: #007bff;
-      color: white;
+      margin: 10px;
       border: none;
       border-radius: 6px;
       cursor: pointer;
-      user-select: none;
+    }
+    #lockBtn {
+      background-color: #007bff;
+      color: white;
     }
     #lockBtn:disabled {
       background-color: #6c757d;
       cursor: not-allowed;
     }
+    #resetBtn {
+      background-color: #dc3545;
+      color: white;
+    }
   </style>
 </head>
 <body>
 
-<h1>🚌 Bus Seat Tracker Debug</h1>
+<h1>🚌 Bus Seat Availability Tracker</h1>
 <div class="bus" id="bus"></div>
 <button id="lockBtn">Lock Seat</button>
+<button id="resetBtn">Reset Seats</button>
 
 <script>
   const firebaseConfig = {
@@ -93,6 +100,7 @@
   const busId = "bus-001";
   const busContainer = document.getElementById("bus");
   const lockBtn = document.getElementById("lockBtn");
+  const resetBtn = document.getElementById("resetBtn");
 
   const userId = localStorage.getItem("userId") || (() => {
     const id = 'user-' + Math.random().toString(36).substr(2, 9);
@@ -123,19 +131,15 @@
     const cleanup = [];
     for (const [seatKey, data] of Object.entries(pendingData || {})) {
       if (!data.timestamp || (now - data.timestamp) > PENDING_EXPIRY_MS) {
-        console.log(`Removing stale pending selection: ${seatKey}`);
         cleanup.push(db.ref(`${busId}/pendingSelections/${seatKey}`).remove());
       }
     }
-    if (cleanup.length > 0) {
-      await Promise.all(cleanup);
-    }
+    if (cleanup.length > 0) await Promise.all(cleanup);
   }
 
   async function renderSeats(data = {}) {
     busContainer.innerHTML = "";
     selectedSeats.clear();
-
     const pending = data.pendingSelections || {};
     await cleanStalePendings(pending);
 
@@ -172,36 +176,20 @@
         }
 
         el.addEventListener("click", async () => {
-          console.log(`Clicked seat ${label}`);
-          if (isUpdating) {
-            console.log("Update in progress, ignoring click");
-            return;
-          }
-          if (el.classList.contains("taken")) {
-            console.log("Seat taken, ignoring click");
-            return;
-          }
-          if (el.classList.contains("pending-other")) {
-            console.log("Seat pending by others, ignoring click");
-            return;
-          }
-
+          if (isUpdating || el.classList.contains("taken") || el.classList.contains("pending-other")) return;
           isUpdating = true;
           lockBtn.disabled = true;
 
           try {
             const seatKey = `seat${label}`;
             if (selectedSeats.has(label)) {
-              console.log(`Deselecting seat ${label}`);
               await db.ref(`${busId}/pendingSelections/${seatKey}`).remove();
               selectedSeats.delete(label);
             } else {
               const seatSnap = await db.ref(`${busId}/${seatKey}`).get();
               if (seatSnap.exists() && seatSnap.val().taken) {
                 alert("Sorry, seat just got taken!");
-                console.log(`Seat ${label} just taken`);
               } else {
-                console.log(`Selecting seat ${label}`);
                 await db.ref(`${busId}/pendingSelections/${seatKey}`).set({
                   userId,
                   timestamp: Date.now()
@@ -224,17 +212,13 @@
   }
 
   lockBtn.addEventListener("click", async () => {
-    if (isUpdating) {
-      console.log("Update already in progress");
-      return;
-    }
-    if (selectedSeats.size === 0) {
+    if (isUpdating || selectedSeats.size === 0) {
       alert("Please select at least one seat to lock.");
       return;
     }
 
-    lockBtn.disabled = true;
     isUpdating = true;
+    lockBtn.disabled = true;
 
     const timestamp = Date.now();
     const updates = {};
@@ -244,8 +228,6 @@
       updates[`${busId}/${seatKey}`] = { taken: true, timestamp };
       updates[`${busId}/pendingSelections/${seatKey}`] = null;
     });
-
-    console.log("Locking seats:", [...selectedSeats]);
 
     try {
       await db.ref().update(updates);
@@ -259,8 +241,36 @@
     lockBtn.disabled = false;
   });
 
+  resetBtn.addEventListener("click", async () => {
+    const password = prompt("Enter password to reset all seats:");
+    if (password !== "D32BusRoyalCinere") {
+      alert("Incorrect password.");
+      return;
+    }
+
+    if (!confirm("Are you sure you want to reset all seats to green?")) return;
+
+    try {
+      const snapshot = await db.ref(busId).get();
+      const data = snapshot.val() || {};
+      const updates = {};
+
+      for (const key in data) {
+        if (key.startsWith("seat") && data[key].taken) {
+          updates[`${busId}/${key}`] = null;
+        }
+      }
+      updates[`${busId}/pendingSelections`] = null;
+
+      await db.ref().update(updates);
+      alert("Seats have been reset.");
+    } catch (err) {
+      console.error("Reset failed:", err);
+      alert("Failed to reset seats.");
+    }
+  });
+
   db.ref(busId).on("value", async (snapshot) => {
-    console.log("Database updated");
     const data = snapshot.val() || {};
     await renderSeats(data);
   });
