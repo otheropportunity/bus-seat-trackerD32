@@ -2,19 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Bus Seat Tracker Auto Release (15 min)</title>
+  <title>🚌 Bus Seat Tracker Debug</title>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <style>
     body {
       font-family: Arial, sans-serif;
-      background: #f0f4f8;
       text-align: center;
+      background: #f0f4f8;
       padding: 20px;
     }
-    h1 {
-      margin-bottom: 20px;
-    }
+    h1 { margin-bottom: 20px; }
     .bus {
       display: grid;
       grid-template-columns: repeat(5, 80px);
@@ -35,42 +33,51 @@
       transition: background-color 0.3s ease;
     }
     .seat {
-      cursor: pointer;
+      background-color: #28a745;
       color: white;
+      cursor: pointer;
     }
-    .seat.available {
-      background-color: #28a745; /* green */
-    }
-    .seat.pending {
-      background-color: #ffc107; /* yellow */
+    .seat.selected {
+      background-color: #ffc107;
       color: black;
-      cursor: wait;
+    }
+    .seat.pending-other {
+      background-color: #ffdb99;
+      color: black;
+      cursor: not-allowed;
     }
     .seat.taken {
-      background-color: #dc3545; /* red */
+      background-color: #dc3545;
       cursor: not-allowed;
+      color: white;
     }
     .label {
       background-color: #ccc;
       cursor: default;
-      color: black;
     }
-    #message {
-      margin-top: 10px;
-      font-weight: bold;
-      color: #333;
+    #lockBtn {
+      padding: 10px 20px;
+      font-size: 16px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    #lockBtn:disabled {
+      background-color: #6c757d;
+      cursor: not-allowed;
     }
   </style>
 </head>
 <body>
 
-<h1>🚌 Bus Seat Tracker Auto Release (15 min)</h1>
-
+<h1>🚌 Bus Seat Tracker Debug</h1>
 <div class="bus" id="bus"></div>
-<div id="message"></div>
+<button id="lockBtn">Lock Seat</button>
 
 <script>
-  // ==== Firebase setup ====
   const firebaseConfig = {
     apiKey: "AIzaSyBxkR6Y4ODLqlnsHNv5ZSS6PcPC4CskiVk",
     authDomain: "bus-seat-allocation.firebaseapp.com",
@@ -80,22 +87,19 @@
     messagingSenderId: "103762500529",
     appId: "1:103762500529:web:5c05b8517356656b70bb90"
   };
+
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
-
-  // Bus & seats setup
   const busId = "bus-001";
   const busContainer = document.getElementById("bus");
-  const messageEl = document.getElementById("message");
+  const lockBtn = document.getElementById("lockBtn");
 
-  // User ID to identify seat selections
   const userId = localStorage.getItem("userId") || (() => {
-    const id = "user-" + Math.random().toString(36).substr(2, 9);
+    const id = 'user-' + Math.random().toString(36).substr(2, 9);
     localStorage.setItem("userId", id);
     return id;
   })();
 
-  // Seat layout array with labels
   const seatLayout = [
     "", "", "", "Driver", "",
     "1", "", "", "", "",
@@ -110,150 +114,156 @@
     "26", "27", "28", "29", "30"
   ];
 
-  // 15 min timer in ms
-  const RELEASE_TIME_MS = 1 * 60 * 1000;
-
-  // For throttling seat update requests
+  let selectedSeats = new Set();
   let isUpdating = false;
+  const PENDING_EXPIRY_MS = 20 * 1000;
 
-  // Render seats UI and attach click handlers
-  function renderSeats(busData) {
-    busContainer.innerHTML = "";
+  async function cleanStalePendings(pendingData) {
     const now = Date.now();
-    const seatsTakenCount = seatLayout.reduce((count, label) => {
-      if (!label || ["Driver","DOOR","TAPIN/OUT"].includes(label)) return count;
-      const seatKey = "seat" + label;
-      if (busData[seatKey] && busData[seatKey].taken) return count + 1;
-      return count;
-    }, 0);
-    const totalSeats = seatLayout.filter(l => l && !["Driver","DOOR","TAPIN/OUT"].includes(l)).length;
-
-    // Show timer message if all taken and release timer active
-    if (busData.allTakenTimestamp) {
-      const elapsed = now - busData.allTakenTimestamp;
-      if (elapsed < RELEASE_TIME_MS) {
-        const remaining = Math.ceil((RELEASE_TIME_MS - elapsed) / 1000);
-        messageEl.textContent = `All seats taken. Auto release in ${remaining} seconds.`;
-      } else {
-        messageEl.textContent = "Releasing all seats now...";
+    const cleanup = [];
+    for (const [seatKey, data] of Object.entries(pendingData || {})) {
+      if (!data.timestamp || (now - data.timestamp) > PENDING_EXPIRY_MS) {
+        console.log(`Removing stale pending selection: ${seatKey}`);
+        cleanup.push(db.ref(`${busId}/pendingSelections/${seatKey}`).remove());
       }
-    } else {
-      messageEl.textContent = `Seats Taken: ${seatsTakenCount} / ${totalSeats}`;
     }
+    if (cleanup.length > 0) {
+      await Promise.all(cleanup);
+    }
+  }
+
+  async function renderSeats(data = {}) {
+    busContainer.innerHTML = "";
+    selectedSeats.clear();
+
+    const pending = data.pendingSelections || {};
+    await cleanStalePendings(pending);
+
+    const snapshot = await db.ref(busId).get();
+    const freshData = snapshot.val() || {};
+    const freshPending = freshData.pendingSelections || {};
+    const now = Date.now();
 
     for (const label of seatLayout) {
       const el = document.createElement("div");
-      if (!label || ["Driver","DOOR","TAPIN/OUT"].includes(label)) {
-        el.className = "label";
-        el.textContent = label || "";
-      } else {
-        const seatKey = "seat" + label;
-        el.className = "seat";
-        el.textContent = label;
 
-        if (busData[seatKey] && busData[seatKey].taken) {
+      if (["Driver", "DOOR", "TAPIN/OUT", "LUGGAGE", ""].includes(label)) {
+        el.className = "label";
+        el.innerText = label;
+      } else {
+        const seatKey = `seat${label}`;
+        const seatData = freshData[seatKey];
+        const pendingData = freshPending[seatKey];
+
+        el.className = "seat";
+        el.innerText = label;
+
+        if (seatData && seatData.taken) {
           el.classList.add("taken");
-        } else {
-          el.classList.add("available");
+        } else if (pendingData && (now - pendingData.timestamp) <= PENDING_EXPIRY_MS) {
+          if (pendingData.userId === userId) {
+            el.classList.add("selected");
+            selectedSeats.add(label);
+          } else {
+            el.classList.add("pending-other");
+            el.title = "Seat pending by another user";
+            el.style.cursor = "not-allowed";
+          }
         }
 
-        el.onclick = () => {
-          if (isUpdating) return;
-          if (el.classList.contains("taken")) {
-            alert("Seat already taken");
+        el.addEventListener("click", async () => {
+          console.log(`Clicked seat ${label}`);
+          if (isUpdating) {
+            console.log("Update in progress, ignoring click");
             return;
           }
-          toggleSeat(seatKey);
-        };
+          if (el.classList.contains("taken")) {
+            console.log("Seat taken, ignoring click");
+            return;
+          }
+          if (el.classList.contains("pending-other")) {
+            console.log("Seat pending by others, ignoring click");
+            return;
+          }
+
+          isUpdating = true;
+          lockBtn.disabled = true;
+
+          try {
+            const seatKey = `seat${label}`;
+            if (selectedSeats.has(label)) {
+              console.log(`Deselecting seat ${label}`);
+              await db.ref(`${busId}/pendingSelections/${seatKey}`).remove();
+              selectedSeats.delete(label);
+            } else {
+              const seatSnap = await db.ref(`${busId}/${seatKey}`).get();
+              if (seatSnap.exists() && seatSnap.val().taken) {
+                alert("Sorry, seat just got taken!");
+                console.log(`Seat ${label} just taken`);
+              } else {
+                console.log(`Selecting seat ${label}`);
+                await db.ref(`${busId}/pendingSelections/${seatKey}`).set({
+                  userId,
+                  timestamp: Date.now()
+                });
+                selectedSeats.add(label);
+              }
+            }
+          } catch (err) {
+            console.error("Error updating pending selection:", err);
+            alert("Failed to update seat selection.");
+          } finally {
+            isUpdating = false;
+            lockBtn.disabled = false;
+          }
+        });
       }
+
       busContainer.appendChild(el);
     }
   }
 
-  // Toggle seat selection in Firebase
-  async function toggleSeat(seatKey) {
-    if (isUpdating) return;
+  lockBtn.addEventListener("click", async () => {
+    if (isUpdating) {
+      console.log("Update already in progress");
+      return;
+    }
+    if (selectedSeats.size === 0) {
+      alert("Please select at least one seat to lock.");
+      return;
+    }
+
+    lockBtn.disabled = true;
     isUpdating = true;
+
+    const timestamp = Date.now();
+    const updates = {};
+
+    selectedSeats.forEach(seat => {
+      const seatKey = `seat${seat}`;
+      updates[`${busId}/${seatKey}`] = { taken: true, timestamp };
+      updates[`${busId}/pendingSelections/${seatKey}`] = null;
+    });
+
+    console.log("Locking seats:", [...selectedSeats]);
+
     try {
-      const seatRef = db.ref(`${busId}/${seatKey}`);
-      const snap = await seatRef.get();
-      if (snap.exists() && snap.val().taken) {
-        alert("Seat just taken by someone else!");
-        return;
-      }
-      // Take the seat (set taken = true and userId + timestamp)
-      await seatRef.set({
-        taken: true,
-        userId,
-        timestamp: Date.now()
-      });
-
-      // After taking, check if all seats taken to set timestamp for auto-release
-      await checkAllTakenAndSetTimer();
-
+      await db.ref().update(updates);
+      selectedSeats.clear();
     } catch (e) {
-      console.error("Error toggling seat:", e);
-    } finally {
-      isUpdating = false;
+      alert("Error locking seats: " + e.message);
+      console.error(e);
     }
-  }
 
-  // Check if all seats are taken, and if yes, set a timestamp to start the 15-min release timer
-  async function checkAllTakenAndSetTimer() {
-    const busRef = db.ref(busId);
-    const snap = await busRef.get();
-    const data = snap.val() || {};
-    const totalSeats = seatLayout.filter(l => l && !["Driver","DOOR","TAPIN/OUT"].includes(l)).length;
-    const takenSeats = seatLayout.reduce((count, label) => {
-      if (!label || ["Driver","DOOR","TAPIN/OUT"].includes(label)) return count;
-      const seatKey = "seat" + label;
-      if (data[seatKey] && data[seatKey].taken) return count + 1;
-      return count;
-    }, 0);
-
-    if (takenSeats === totalSeats) {
-      if (!data.allTakenTimestamp) {
-        // Set allTakenTimestamp to now
-        await busRef.child("allTakenTimestamp").set(Date.now());
-      }
-    } else {
-      // Not all taken - clear any existing timestamp
-      if (data.allTakenTimestamp) {
-        await busRef.child("allTakenTimestamp").remove();
-      }
-    }
-  }
-
-  // Monitor seats changes & auto release seats after 15 min if all taken
-  db.ref(busId).on("value", async (snapshot) => {
-    const data = snapshot.val() || {};
-    renderSeats(data);
-
-    if (data.allTakenTimestamp) {
-      const now = Date.now();
-      const elapsed = now - data.allTakenTimestamp;
-
-      if (elapsed >= RELEASE_TIME_MS) {
-        // Time to release all seats
-        console.log("Releasing all seats after 15 minutes.");
-
-        // Reset all seat taken flags & allTakenTimestamp
-        const updates = {};
-        for (const label of seatLayout) {
-          if (!label || ["Driver","DOOR","TAPIN/OUT"].includes(label)) continue;
-          const seatKey = "seat" + label;
-          updates[seatKey] = { taken: false };
-        }
-        updates["allTakenTimestamp"] = null;
-
-        await db.ref(busId).update(updates);
-        messageEl.textContent = "All seats released! You can select now.";
-      }
-    }
+    isUpdating = false;
+    lockBtn.disabled = false;
   });
 
-  // Initial render with empty seats (will update automatically on db change)
-  renderSeats({});
+  db.ref(busId).on("value", async (snapshot) => {
+    console.log("Database updated");
+    const data = snapshot.val() || {};
+    await renderSeats(data);
+  });
 </script>
 
 </body>
