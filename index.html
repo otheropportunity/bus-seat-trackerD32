@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>🚌 Bus Seat Tracker</title>
+  <title>🚌 Bus Seat Tracker Debug</title>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <style>
@@ -12,12 +12,7 @@
       background: #f0f4f8;
       padding: 20px;
     }
-    h1 { margin-bottom: 10px; }
-    #seat-stats {
-      margin-bottom: 20px;
-      font-size: 18px;
-      font-weight: bold;
-    }
+    h1 { margin-bottom: 20px; }
     .bus {
       display: grid;
       grid-template-columns: repeat(5, 80px);
@@ -34,6 +29,8 @@
       justify-content: center;
       font-weight: bold;
       font-size: 16px;
+      user-select: none;
+      transition: background-color 0.3s ease;
     }
     .seat {
       background-color: #28a745;
@@ -44,9 +41,15 @@
       background-color: #ffc107;
       color: black;
     }
+    .seat.pending-other {
+      background-color: #ffdb99; /* lighter yellow for others */
+      color: black;
+      cursor: not-allowed;
+    }
     .seat.taken {
       background-color: #dc3545;
       cursor: not-allowed;
+      color: white;
     }
     .label {
       background-color: #ccc;
@@ -60,13 +63,17 @@
       border: none;
       border-radius: 6px;
       cursor: pointer;
+      user-select: none;
+    }
+    #lockBtn:disabled {
+      background-color: #6c757d;
+      cursor: not-allowed;
     }
   </style>
 </head>
 <body>
 
-<h1>🚌 Bus Seat Tracker</h1>
-<div id="seat-stats">Loading seat stats...</div>
+<h1>🚌 Bus Seat Tracker Debug</h1>
 <div class="bus" id="bus"></div>
 <button id="lockBtn">Lock Seat</button>
 
@@ -86,7 +93,12 @@
   const busId = "bus-001";
   const busContainer = document.getElementById("bus");
   const lockBtn = document.getElementById("lockBtn");
-  const seatStats = document.getElementById("seat-stats");
+
+  const userId = localStorage.getItem("userId") || (() => {
+    const id = 'user-' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem("userId", id);
+    return id;
+  })();
 
   const seatLayout = [
     "", "", "", "Driver", "",
@@ -102,90 +114,159 @@
     "26", "27", "28", "29", "30"
   ];
 
-  const seatNumbers = seatLayout.filter(s => /^\d+$/.test(s));
   let selectedSeats = new Set();
+  let isUpdating = false;
+  const PENDING_EXPIRY_MS = 20 * 1000;
 
-  function updateStats(takenSeatsCount) {
-    const total = seatNumbers.length;
-    const selected = selectedSeats.size;
-    const taken = takenSeatsCount;
-    const available = total - taken - selected;
-
-    seatStats.innerHTML = `
-      🪑 Total Seats: ${total} |
-      🔴 Taken: ${taken} |
-      🟡 Selected: ${selected} |
-      🟢 Available: ${available}
-    `;
+  async function cleanStalePendings(pendingData) {
+    const now = Date.now();
+    const cleanup = [];
+    for (const [seatKey, data] of Object.entries(pendingData || {})) {
+      if (!data.timestamp || (now - data.timestamp) > PENDING_EXPIRY_MS) {
+        console.log(`Removing stale pending selection: ${seatKey}`);
+        cleanup.push(db.ref(`${busId}/pendingSelections/${seatKey}`).remove());
+      }
+    }
+    if (cleanup.length > 0) {
+      await Promise.all(cleanup);
+    }
   }
 
-  function renderSeats(data = {}) {
+  async function renderSeats(data = {}) {
     busContainer.innerHTML = "";
     selectedSeats.clear();
-    const now = Date.now();
-    let allTaken = true;
-    let takenCount = 0;
-    let oldestTimestamp = null;
 
-    seatLayout.forEach(label => {
+    const pending = data.pendingSelections || {};
+
+    await cleanStalePendings(pending);
+
+    const snapshot = await db.ref(busId).get();
+    const freshData = snapshot.val() || {};
+    const freshPending = freshData.pendingSelections || {};
+    const now = Date.now();
+
+    for (const label of seatLayout) {
       const el = document.createElement("div");
 
-      if (label === "Driver" || label === "DOOR" || label === "TAPIN/OUT" || label === "LUGGAGE" || label === "") {
+      if (["Driver", "DOOR", "TAPIN/OUT", "LUGGAGE", ""].includes(label)) {
         el.className = "label";
         el.innerText = label;
       } else {
+        const seatKey = `seat${label}`;
+        const seatData = freshData[seatKey];
+        const pendingData = freshPending[seatKey];
+
         el.className = "seat";
         el.innerText = label;
 
-        const seatKey = `seat-${label}`;
-        const seatData = data[seatKey];
-
         if (seatData && seatData.taken) {
           el.classList.add("taken");
-          takenCount++;
-          if (!oldestTimestamp || seatData.timestamp < oldestTimestamp) {
-            oldestTimestamp = seatData.timestamp;
-          }
-        } else {
-          allTaken = false;
-        }
-
-        el.addEventListener("click", () => {
-          if (el.classList.contains("taken")) return;
-          if (el.classList.contains("selected")) {
-            el.classList.remove("selected");
-            selectedSeats.delete(label);
-          } else {
+        } else if (pendingData && (now - pendingData.timestamp) <= PENDING_EXPIRY_MS) {
+          if (pendingData.userId === userId) {
             el.classList.add("selected");
             selectedSeats.add(label);
+          } else {
+            el.classList.add("pending-other");
+            el.title = "Seat pending by another user";
+            el.style.cursor = "not-allowed";
           }
-          updateStats(takenCount);
+        }
+
+        el.addEventListener("click", async () => {
+          console.log(`Clicked seat ${label}`);
+          if (isUpdating) {
+            console.log("Update in progress, ignoring click");
+            return;
+          }
+          if (el.classList.contains("taken")) {
+            console.log("Seat taken, ignoring click");
+            return;
+          }
+          if (el.classList.contains("pending-other")) {
+            console.log("Seat pending by others, ignoring click");
+            return;
+          }
+
+          isUpdating = true;
+          lockBtn.disabled = true;
+
+          try {
+            const seatKey = `seat${label}`;
+            if (selectedSeats.has(label)) {
+              console.log(`Deselecting seat ${label}`);
+              await db.ref(`${busId}/pendingSelections/${seatKey}`).remove();
+              selectedSeats.delete(label);
+            } else {
+              // Double check availability before setting
+              const seatSnap = await db.ref(`${busId}/${seatKey}`).get();
+              if (seatSnap.exists() && seatSnap.val().taken) {
+                alert("Sorry, seat just got taken!");
+                console.log(`Seat ${label} just taken`);
+              } else {
+                console.log(`Selecting seat ${label}`);
+                await db.ref(`${busId}/pendingSelections/${seatKey}`).set({
+                  userId,
+                  timestamp: Date.now()
+                });
+                selectedSeats.add(label);
+              }
+            }
+          } catch (err) {
+            console.error("Error updating pending selection:", err);
+            alert("Failed to update seat selection.");
+          } finally {
+            isUpdating = false;
+            lockBtn.disabled = false;
+          }
         });
       }
 
       busContainer.appendChild(el);
-    });
-
-    // 🔄 Auto reset ALL seats only if all are taken for over 15 mins
-    if (allTaken && oldestTimestamp && (Date.now() - oldestTimestamp >= 15 * 60 * 1000)) {
-      db.ref(busId).remove();
     }
-
-    updateStats(takenCount);
   }
 
-  lockBtn.addEventListener("click", () => {
+  lockBtn.addEventListener("click", async () => {
+    if (isUpdating) {
+      console.log("Update already in progress");
+      return;
+    }
+    if (selectedSeats.size === 0) {
+      alert("Please select at least one seat to lock.");
+      return;
+    }
+
+    lockBtn.disabled = true;
+    isUpdating = true;
+
     const timestamp = Date.now();
+    const updates = {};
+
     selectedSeats.forEach(seat => {
-      const seatKey = `seat-${seat}`;
-      db.ref(`${busId}/${seatKey}`).set({ taken: true, timestamp });
+      const seatKey = `seat${seat}`;
+      updates[`${busId}/${seatKey}`] = { taken: true, timestamp };
+      updates[`${busId}/pendingSelections/${seatKey}`] = null;
     });
-    selectedSeats.clear();
+
+    console.log("Locking seats:", [...selectedSeats]);
+
+    try {
+      await db.ref().update(updates);
+      selectedSeats.clear();
+    } catch (e) {
+      alert("Error locking seats: " + e.message);
+      console.error(e);
+    }
+
+    isUpdating = false;
+    lockBtn.disabled = false;
   });
 
-  db.ref(busId).on("value", snapshot => {
-    renderSeats(snapshot.val() || {});
+  db.ref(busId).on("value", async (snapshot) => {
+    console.log("Database updated");
+    const data = snapshot.val() || {};
+    await renderSeats(data);
   });
+
 </script>
 
 </body>
