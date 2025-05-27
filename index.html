@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>🚌 Bus Seat Tracker Debug</title>
+  <title>🚌 Bus Seat Availability Tracker</title>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <style>
@@ -12,7 +12,28 @@
       background: #f0f4f8;
       padding: 20px;
     }
-    h1 { margin-bottom: 20px; }
+    h1 {
+      margin-bottom: 10px;
+    }
+    #seat-stats, #legend {
+      font-size: 18px;
+      margin-bottom: 15px;
+    }
+    .legend-box {
+      display: inline-flex;
+      align-items: center;
+      margin: 0 10px;
+    }
+    .color-box {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      margin-right: 5px;
+      display: inline-block;
+    }
+    .green { background-color: #28a745; }
+    .yellow { background-color: #ffc107; }
+    .red { background-color: #dc3545; }
     .bus {
       display: grid;
       grid-template-columns: repeat(5, 80px);
@@ -55,34 +76,43 @@
       background-color: #ccc;
       cursor: default;
     }
-    button {
+    #lockBtn, #resetBtn {
       padding: 10px 20px;
       font-size: 16px;
       margin: 10px;
+      background-color: #007bff;
+      color: white;
       border: none;
       border-radius: 6px;
       cursor: pointer;
+      user-select: none;
     }
-    #lockBtn {
-      background-color: #007bff;
-      color: white;
-    }
-    #lockBtn:disabled {
+    #lockBtn:disabled, #resetBtn:disabled {
       background-color: #6c757d;
       cursor: not-allowed;
-    }
-    #resetBtn {
-      background-color: #dc3545;
-      color: white;
     }
   </style>
 </head>
 <body>
 
 <h1>🚌 Bus Seat Availability Tracker</h1>
+
+<!-- Seat Statistics -->
+<div id="seat-stats">Loading seat data...</div>
+
+<!-- Color Legend -->
+<div id="legend">
+  <span class="legend-box"><span class="color-box green"></span> Available</span>
+  <span class="legend-box"><span class="color-box yellow"></span> Pending</span>
+  <span class="legend-box"><span class="color-box red"></span> Taken</span>
+</div>
+
+<!-- Seat Grid -->
 <div class="bus" id="bus"></div>
+
+<!-- Action Buttons -->
 <button id="lockBtn">Lock Seat</button>
-<button id="resetBtn">Reset Seats</button>
+<button id="resetBtn">Reset All</button>
 
 <script>
   const firebaseConfig = {
@@ -134,12 +164,15 @@
         cleanup.push(db.ref(`${busId}/pendingSelections/${seatKey}`).remove());
       }
     }
-    if (cleanup.length > 0) await Promise.all(cleanup);
+    if (cleanup.length > 0) {
+      await Promise.all(cleanup);
+    }
   }
 
   async function renderSeats(data = {}) {
     busContainer.innerHTML = "";
     selectedSeats.clear();
+
     const pending = data.pendingSelections || {};
     await cleanStalePendings(pending);
 
@@ -176,7 +209,9 @@
         }
 
         el.addEventListener("click", async () => {
-          if (isUpdating || el.classList.contains("taken") || el.classList.contains("pending-other")) return;
+          if (isUpdating) return;
+          if (el.classList.contains("taken") || el.classList.contains("pending-other")) return;
+
           isUpdating = true;
           lockBtn.disabled = true;
 
@@ -198,8 +233,7 @@
               }
             }
           } catch (err) {
-            console.error("Error updating pending selection:", err);
-            alert("Failed to update seat selection.");
+            alert("Error updating seat.");
           } finally {
             isUpdating = false;
             lockBtn.disabled = false;
@@ -209,6 +243,24 @@
 
       busContainer.appendChild(el);
     }
+
+    // Seat stats
+    const total = seatLayout.filter(label => label && !["Driver", "DOOR", "TAPIN/OUT", "LUGGAGE"].includes(label)).length;
+    let taken = 0, pendingCount = 0;
+
+    for (const label of seatLayout) {
+      const key = `seat${label}`;
+      if (freshData[key]?.taken) taken++;
+      else if (freshPending[key]) pendingCount++;
+    }
+
+    const available = total - taken - pendingCount;
+    document.getElementById("seat-stats").innerHTML = `
+      <strong>Total Seats:</strong> ${total} |
+      <strong>Available:</strong> ${available} |
+      <strong>Taken:</strong> ${taken} |
+      <strong>Pending:</strong> ${pendingCount}
+    `;
   }
 
   lockBtn.addEventListener("click", async () => {
@@ -217,8 +269,8 @@
       return;
     }
 
-    isUpdating = true;
     lockBtn.disabled = true;
+    isUpdating = true;
 
     const timestamp = Date.now();
     const updates = {};
@@ -234,7 +286,6 @@
       selectedSeats.clear();
     } catch (e) {
       alert("Error locking seats: " + e.message);
-      console.error(e);
     }
 
     isUpdating = false;
@@ -242,31 +293,25 @@
   });
 
   resetBtn.addEventListener("click", async () => {
-    const password = prompt("Enter password to reset all seats:");
-    if (password !== "D32BusRoyalCinere") {
+    const input = prompt("Enter admin password to reset:");
+    if (input !== "D32BusRoyalCinere") {
       alert("Incorrect password.");
       return;
     }
 
-    if (!confirm("Are you sure you want to reset all seats to green?")) return;
+    const updates = {};
+    for (const label of seatLayout) {
+      if (!["Driver", "DOOR", "TAPIN/OUT", "LUGGAGE", ""].includes(label)) {
+        updates[`${busId}/seat${label}`] = null;
+        updates[`${busId}/pendingSelections/seat${label}`] = null;
+      }
+    }
 
     try {
-      const snapshot = await db.ref(busId).get();
-      const data = snapshot.val() || {};
-      const updates = {};
-
-      for (const key in data) {
-        if (key.startsWith("seat") && data[key].taken) {
-          updates[`${busId}/${key}`] = null;
-        }
-      }
-      updates[`${busId}/pendingSelections`] = null;
-
       await db.ref().update(updates);
-      alert("Seats have been reset.");
+      alert("All seats reset to available.");
     } catch (err) {
-      console.error("Reset failed:", err);
-      alert("Failed to reset seats.");
+      alert("Reset failed: " + err.message);
     }
   });
 
