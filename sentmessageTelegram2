@@ -6,19 +6,105 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <style>
-    /* ... existing styles unchanged ... */
+    /* All your existing styles (unchanged) */
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #f0f4f8;
+      padding: 20px;
+    }
+    h1 { margin-bottom: 10px; }
+    #seat-stats, #legend {
+      font-size: 18px;
+      margin-bottom: 15px;
+    }
+    .legend-box { display: inline-flex; align-items: center; margin: 0 10px; }
+    .color-box {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      margin-right: 5px;
+      display: inline-block;
+    }
+    .green { background-color: #28a745; }
+    .yellow { background-color: #ffc107; }
+    .red { background-color: #dc3545; }
+    .bus {
+      display: grid;
+      grid-template-columns: repeat(5, 80px);
+      gap: 10px;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    .seat, .label {
+      width: 80px;
+      height: 80px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 16px;
+      user-select: none;
+      transition: background-color 0.3s ease;
+    }
+    .seat {
+      background-color: #28a745;
+      color: white;
+      cursor: pointer;
+    }
+    .seat.selected {
+      background-color: #ffc107;
+      color: black;
+    }
+    .seat.pending-other {
+      background-color: #ffdb99;
+      color: black;
+      cursor: not-allowed;
+    }
+    .seat.taken {
+      background-color: #dc3545;
+      cursor: not-allowed;
+      color: white;
+    }
+    .label {
+      background-color: #ccc;
+      cursor: default;
+    }
+    #lockBtn, #resetBtn {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin: 10px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    #resetBtn {
+      background-color: #dc3545;
+    }
+    #lockBtn:disabled, #resetBtn:disabled {
+      background-color: #6c757d;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 <body>
 
 <h1>🚌 Bus Seat Availability Tracker</h1>
+
 <div id="seat-stats">Loading seat data...</div>
+
 <div id="legend">
   <span class="legend-box"><span class="color-box green"></span> Available</span>
   <span class="legend-box"><span class="color-box yellow"></span> Pending</span>
   <span class="legend-box"><span class="color-box red"></span> Taken</span>
 </div>
+
 <div class="bus" id="bus"></div>
+
 <button id="lockBtn">Lock Seat</button>
 <button id="resetBtn">Reset All</button>
 
@@ -32,9 +118,6 @@
     messagingSenderId: "103762500529",
     appId: "1:103762500529:web:5c05b8517356656b70bb90"
   };
-
-  const TELEGRAM_BOT_TOKEN = "7997261606:AAEnNdEcMlIMZiyiWE9MqkMcrFtm2AUdHyI";
-  const TELEGRAM_CHAT_ID = "6576361445";
 
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
@@ -173,15 +256,6 @@
     `;
   }
 
-  async function sendTelegramMessage(message) {
-    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-    await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: message })
-    });
-  }
-
   lockBtn.addEventListener("click", async () => {
     if (isUpdating || selectedSeats.size === 0) {
       alert("Please select at least one seat to lock.");
@@ -202,16 +276,7 @@
 
     try {
       await db.ref().update(updates);
-      const snapshot = await db.ref(busId).get();
-      const data = snapshot.val() || {};
-      const total = seatLayout.filter(label => label && !["Driver", "DOOR", "TAPIN/OUT", "LUGGAGE"].includes(label)).length;
-      const taken = seatLayout.reduce((acc, label) => acc + (data[`seat${label}`]?.taken ? 1 : 0), 0);
-      const message = `✅ Seat(s) locked: ${[...selectedSeats].join(", ")}
-Bus: ${busId}
-Locked: ${selectedSeats.size}
-Taken: ${taken}
-Available: ${total - taken}`;
-      await sendTelegramMessage(message);
+      sendTelegramNotification([...selectedSeats]);  // ✅ Telegram Alert
       selectedSeats.clear();
     } catch (e) {
       alert("Error locking seats: " + e.message);
@@ -248,6 +313,26 @@ Available: ${total - taken}`;
     const data = snapshot.val() || {};
     await renderSeats(data);
   });
+
+  // ✅ Telegram Function
+  const TELEGRAM_BOT_TOKEN = "7997261606:AAEnNdEcMlIMZiyiWE9MqkMcrFtm2AUdHyI";
+  const TELEGRAM_CHAT_ID = "6576361445";
+
+  function sendTelegramNotification(lockedSeats) {
+    const message = `🚍 *Bus Seat Locked*\nSeats: ${lockedSeats.join(", ")}\nBy: ${userId}`;
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+    const payload = {
+      chat_id: TELEGRAM_CHAT_ID,
+      text: message,
+      parse_mode: "Markdown"
+    };
+
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).catch(err => console.error("Telegram error:", err));
+  }
 </script>
 
 </body>
