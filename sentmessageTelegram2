@@ -11,6 +11,8 @@
     .taken { background-color: red; }
     .label { margin-top: 20px; }
     .legend span { margin-right: 10px; padding: 5px 10px; border-radius: 5px; display: inline-block; }
+    #btnContainer { margin-top: 20px; }
+    button { padding: 10px 20px; font-size: 16px; margin: 10px; }
   </style>
 </head>
 <body>
@@ -24,8 +26,10 @@
     <span style="background: red; color: white;">Taken</span>
   </div>
 
-  <br>
-  <button id="lockBtn">🔒 Lock Seat</button>
+  <div id="btnContainer">
+    <button id="lockBtn">🔒 Lock Seat</button>
+    <button id="checkLocationBtn">📍 Show Last Location</button>
+  </div>
 
   <h4 id="locationDisplay" style="margin-top: 20px; color: blue;"></h4>
 
@@ -35,13 +39,13 @@
 
   <script>
     const firebaseConfig = {
-      apiKey: "AIzaSyBxkR6Y4ODLqlnsHNv5ZSS6PcPC4CskiVk",
+      apiKey: "AIzaSyA9aQHnSMPnk4-xzpvELktHzHnWGo5LHT0",
       authDomain: "bus-seat-allocation.firebaseapp.com",
       databaseURL: "https://bus-seat-allocation-default-rtdb.asia-southeast1.firebasedatabase.app",
       projectId: "bus-seat-allocation",
-      storageBucket: "bus-seat-allocation.firebasestorage.app",
-      messagingSenderId: "103762500529",
-      appId: "1:103762500529:web:5c05b8517356656b70bb90"
+      storageBucket: "bus-seat-allocation.appspot.com",
+      messagingSenderId: "533213244730",
+      appId: "1:533213244730:web:f6db1f24714938f12cb0d3"
     };
 
     firebase.initializeApp(firebaseConfig);
@@ -49,6 +53,7 @@
     const busId = "bus-001";
     const seatGrid = document.getElementById("seatGrid");
     const lockBtn = document.getElementById("lockBtn");
+    const checkLocationBtn = document.getElementById("checkLocationBtn");
     const locationDisplay = document.getElementById("locationDisplay");
 
     let seatStatus = {};
@@ -131,16 +136,23 @@
               error: error.message || "Location access denied"
             });
             locationDisplay.innerText = `📍 Location unavailable: ${error.message}`;
-          },
-          {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 0
           }
         );
 
       } catch (err) {
         console.error("Lock failed", err);
+      }
+    };
+
+    checkLocationBtn.onclick = async () => {
+      const locRef = db.ref(`${busId}/lastLocation`);
+      const snapshot = await locRef.get();
+      const loc = snapshot.val();
+
+      if (loc && loc.lat != null && loc.lng != null) {
+        locationDisplay.innerText = `📍 Last Locked Location: Latitude ${loc.lat}, Longitude ${loc.lng}`;
+      } else {
+        locationDisplay.innerText = "❌ No location data available.";
       }
     };
 
