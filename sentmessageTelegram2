@@ -1,162 +1,232 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8" />
   <title>🚌 Bus Seat Availability Tracker</title>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <style>
-    body { font-family: Arial; padding: 20px; text-align: center; }
-    .grid { display: grid; grid-template-columns: repeat(5, 60px); gap: 10px; justify-content: center; }
-    .seat { width: 60px; height: 60px; border-radius: 10px; display: flex; justify-content: center; align-items: center; cursor: pointer; color: white; font-weight: bold; }
-    .available { background-color: green; }
-    .pending { background-color: yellow; color: black; }
-    .taken { background-color: red; }
-    .label { margin-top: 20px; }
-    .legend span { margin-right: 10px; padding: 5px 10px; border-radius: 5px; display: inline-block; }
-    #btnContainer { margin-top: 20px; }
-    button { padding: 10px 20px; font-size: 16px; margin: 10px; }
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #f0f4f8;
+      padding: 20px;
+    }
+    h1 { margin-bottom: 10px; }
+    #locationDisplay {
+      font-size: 18px;
+      margin-bottom: 10px;
+      color: #333;
+    }
+    #seat-stats, #legend {
+      font-size: 18px;
+      margin-bottom: 15px;
+    }
+    .legend-box {
+      display: inline-flex;
+      align-items: center;
+      margin: 0 10px;
+    }
+    .color-box {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      margin-right: 5px;
+      display: inline-block;
+    }
+    .green { background-color: #28a745; }
+    .yellow { background-color: #ffc107; }
+    .red { background-color: #dc3545; }
+    .bus {
+      display: grid;
+      grid-template-columns: repeat(5, 80px);
+      gap: 10px;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    .seat, .label {
+      width: 80px;
+      height: 80px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 16px;
+      user-select: none;
+      transition: background-color 0.3s ease;
+    }
+    .seat {
+      background-color: #28a745;
+      color: white;
+      cursor: pointer;
+    }
+    .seat.selected {
+      background-color: #ffc107;
+      color: black;
+    }
+    .seat.taken {
+      background-color: #dc3545;
+      color: white;
+      cursor: not-allowed;
+    }
+    .label {
+      background-color: #ccc;
+      cursor: default;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin: 10px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #lockBtn { background-color: #007bff; color: white; }
+    #resetBtn { background-color: #dc3545; color: white; }
+    #checkLocationBtn { background-color: #17a2b8; color: white; }
   </style>
 </head>
 <body>
 
-  <h2>🚌 Bus Seat Availability Tracker</h2>
-  <div id="seatGrid">Loading seat data...</div>
+<h1>🚌 Bus Seat Availability Tracker</h1>
+<div id="locationDisplay"><strong>Last Locked Seat Location:</strong> <span id="locationText">Loading...</span></div>
+<div id="seat-stats">Loading seat data...</div>
+<div id="legend">
+  <span class="legend-box"><span class="color-box green"></span> Available</span>
+  <span class="legend-box"><span class="color-box yellow"></span> Pending</span>
+  <span class="legend-box"><span class="color-box red"></span> Taken</span>
+</div>
+<div class="bus" id="bus"></div>
+<button id="lockBtn">Lock Seat</button>
+<button id="resetBtn">Reset All</button>
+<button id="checkLocationBtn">Check Location</button>
 
-  <div class="label legend">
-    <span style="background: green; color: white;">Available</span>
-    <span style="background: yellow; color: black;">Pending</span>
-    <span style="background: red; color: white;">Taken</span>
-  </div>
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyBxkR6Y4ODLqlnsHNv5ZSS6PcPC4CskiVk",
+    authDomain: "bus-seat-allocation.firebaseapp.com",
+    databaseURL: "https://bus-seat-allocation-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "bus-seat-allocation",
+    storageBucket: "bus-seat-allocation.firebasestorage.app",
+    messagingSenderId: "103762500529",
+    appId: "1:103762500529:web:5c05b8517356656b70bb90",
+    measurementId: "G-8SVB0Q44Z0"
+  };
 
-  <div id="btnContainer">
-    <button id="lockBtn">🔒 Lock Seat</button>
-    <button id="checkLocationBtn">📍 Show Last Location</button>
-  </div>
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+  const busId = "bus-001";
+  const userId = "user1";
+  const bus = document.getElementById("bus");
+  const seatStats = document.getElementById("seat-stats");
+  const lockBtn = document.getElementById("lockBtn");
+  const resetBtn = document.getElementById("resetBtn");
+  const checkLocationBtn = document.getElementById("checkLocationBtn");
+  const locationText = document.getElementById("locationText");
 
-  <h4 id="locationDisplay" style="margin-top: 20px; color: blue;"></h4>
+  const totalSeats = 20;
+  const selectedSeats = new Set();
+  let isUpdating = false;
 
-  <!-- Firebase -->
-  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+  for (let i = 1; i <= totalSeats; i++) {
+    const seat = document.createElement("div");
+    seat.className = "seat";
+    seat.innerText = i;
+    seat.dataset.seat = i;
+    seat.addEventListener("click", () => toggleSeat(seat));
+    bus.appendChild(seat);
+  }
 
-  <script>
-    const firebaseConfig = {
-      apiKey: "AIzaSyA9aQHnSMPnk4-xzpvELktHzHnWGo5LHT0",
-      authDomain: "bus-seat-allocation.firebaseapp.com",
-      databaseURL: "https://bus-seat-allocation-default-rtdb.asia-southeast1.firebasedatabase.app",
-      projectId: "bus-seat-allocation",
-      storageBucket: "bus-seat-allocation.appspot.com",
-      messagingSenderId: "533213244730",
-      appId: "1:533213244730:web:f6db1f24714938f12cb0d3"
-    };
-
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
-    const busId = "bus-001";
-    const seatGrid = document.getElementById("seatGrid");
-    const lockBtn = document.getElementById("lockBtn");
-    const checkLocationBtn = document.getElementById("checkLocationBtn");
-    const locationDisplay = document.getElementById("locationDisplay");
-
-    let seatStatus = {};
-    let selectedSeats = [];
-
-    function renderSeats() {
-      seatGrid.innerHTML = '';
-      const grid = document.createElement("div");
-      grid.className = "grid";
-      for (let i = 1; i <= 20; i++) {
-        const seatId = `seat-${i}`;
-        const status = seatStatus[seatId] || "available";
-        const div = document.createElement("div");
-        div.className = `seat ${status}`;
-        div.innerText = i;
-        div.onclick = () => {
-          if (status === "available") {
-            seatStatus[seatId] = "pending";
-            selectedSeats.push(seatId);
-          } else if (status === "pending") {
-            seatStatus[seatId] = "available";
-            selectedSeats = selectedSeats.filter(s => s !== seatId);
-          }
-          updateUI();
-        };
-        grid.appendChild(div);
-      }
-      seatGrid.appendChild(grid);
+  function toggleSeat(seatEl) {
+    const seatNum = seatEl.dataset.seat;
+    if (seatEl.classList.contains("taken")) return;
+    if (seatEl.classList.contains("selected")) {
+      seatEl.classList.remove("selected");
+      selectedSeats.delete(seatNum);
+    } else {
+      seatEl.classList.add("selected");
+      selectedSeats.add(seatNum);
     }
+  }
 
-    function updateUI() {
-      renderSeats();
-    }
+  function updateSeatStats() {
+    const taken = document.querySelectorAll(".seat.taken").length;
+    const available = document.querySelectorAll(".seat:not(.taken)").length;
+    seatStats.innerText = `Available: ${available} | Taken: ${taken}`;
+  }
 
-    function fetchSeats() {
-      db.ref(busId + "/pendingSelection").on("value", snapshot => {
-        seatStatus = {};
-        const pending = snapshot.val() || {};
-        Object.keys(pending).forEach(seat => {
-          seatStatus[seat] = "pending";
-        });
+  function syncSeats() {
+    db.ref(busId).on("value", snapshot => {
+      const data = snapshot.val();
+      if (!data) return;
 
-        db.ref(busId + "/taken").once("value").then(snap => {
-          const taken = snap.val() || {};
-          Object.keys(taken).forEach(seat => {
-            seatStatus[seat] = "taken";
-          });
-          updateUI();
-        });
+      document.querySelectorAll(".seat").forEach(seat => {
+        const seatNum = seat.dataset.seat;
+        const seatData = data[`seat${seatNum}`];
+        seat.classList.remove("taken", "selected");
+        if (seatData?.taken) {
+          seat.classList.add("taken");
+        }
       });
+
+      updateSeatStats();
+    });
+  }
+
+  lockBtn.addEventListener("click", async () => {
+    if (isUpdating || selectedSeats.size === 0) return;
+    isUpdating = true;
+    lockBtn.disabled = true;
+
+    const timestamp = Date.now();
+    const updates = {};
+
+    selectedSeats.forEach(seat => {
+      updates[`${busId}/seat${seat}`] = { taken: true, timestamp };
+    });
+
+    try {
+      await db.ref().update(updates);
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        await db.ref(`${busId}/lastLocation`).set({ lat, lng, timestamp });
+        locationText.innerText = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}`;
+      }, () => {
+        locationText.innerText = "Location not available.";
+      });
+      selectedSeats.clear();
+    } catch (err) {
+      alert("Error: " + err.message);
     }
 
-    lockBtn.onclick = async () => {
-      const updates = {};
-      selectedSeats.forEach(seat => {
-        updates[`${busId}/taken/${seat}`] = { lockedAt: Date.now() };
-      });
-      updates[`${busId}/pendingSelection`] = null;
+    isUpdating = false;
+    lockBtn.disabled = false;
+  });
 
-      try {
-        await db.ref().update(updates);
-        selectedSeats = [];
+  resetBtn.addEventListener("click", async () => {
+    if (!confirm("Reset all seats to available?")) return;
+    const updates = {};
+    for (let i = 1; i <= totalSeats; i++) {
+      updates[`${busId}/seat${i}`] = { taken: false };
+    }
+    await db.ref().update(updates);
+  });
 
-        navigator.geolocation.getCurrentPosition(
-          async (position) => {
-            const lat = position.coords.latitude;
-            const lng = position.coords.longitude;
-            await db.ref(`${busId}/lastLocation`).set({
-              lat,
-              lng,
-              timestamp: Date.now()
-            });
-            locationDisplay.innerText = `📍 Last Locked Location: Latitude ${lat}, Longitude ${lng}`;
-          },
-          async (error) => {
-            await db.ref(`${busId}/lastLocation`).set({
-              lat: null,
-              lng: null,
-              timestamp: Date.now(),
-              error: error.message || "Location access denied"
-            });
-            locationDisplay.innerText = `📍 Location unavailable: ${error.message}`;
-          }
-        );
-
-      } catch (err) {
-        console.error("Lock failed", err);
-      }
-    };
-
-    checkLocationBtn.onclick = async () => {
-      const locRef = db.ref(`${busId}/lastLocation`);
-      const snapshot = await locRef.get();
-      const loc = snapshot.val();
-
-      if (loc && loc.lat != null && loc.lng != null) {
-        locationDisplay.innerText = `📍 Last Locked Location: Latitude ${loc.lat}, Longitude ${loc.lng}`;
+  checkLocationBtn.addEventListener("click", () => {
+    db.ref(`${busId}/lastLocation`).once("value", snapshot => {
+      const data = snapshot.val();
+      if (data && data.lat && data.lng) {
+        locationText.innerText = `Lat: ${data.lat.toFixed(5)}, Lng: ${data.lng.toFixed(5)}`;
       } else {
-        locationDisplay.innerText = "❌ No location data available.";
+        locationText.innerText = "No location data available.";
       }
-    };
+    });
+  });
 
-    fetchSeats();
-  </script>
+  syncSeats();
+</script>
+
 </body>
 </html>
