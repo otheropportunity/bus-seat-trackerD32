@@ -57,15 +57,10 @@
       background-color: #ffc107;
       color: black;
     }
-    .seat.pending-other {
-      background-color: #ffdb99;
-      color: black;
-      cursor: not-allowed;
-    }
     .seat.taken {
       background-color: #dc3545;
-      cursor: not-allowed;
       color: white;
+      cursor: not-allowed;
     }
     .label {
       background-color: #ccc;
@@ -106,66 +101,76 @@
 <button id="resetBtn">Reset All</button>
 
 <script>
-  // ✅ Firebase config
   const firebaseConfig = {
     apiKey: "AIzaSyA9aQHnSMPnk4-xzpvELktHzHnWGo5LHT0",
     authDomain: "bus-seat-allocation.firebaseapp.com",
     databaseURL: "https://bus-seat-allocation-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "bus-seat-allocation",
+    projectId: "bus-seat-allocation"
   };
 
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
-
   const busId = "bus-001";
-  const totalSeats = 20;
-  const busElement = document.getElementById("bus");
+
+  const busContainer = document.getElementById("bus");
   const seatStats = document.getElementById("seat-stats");
+  const lastLocationEl = document.getElementById("last-location-link");
   const lockBtn = document.getElementById("lockBtn");
   const resetBtn = document.getElementById("resetBtn");
-  const selectedSeats = new Set();
+
+  let selectedSeats = new Set();
   let isUpdating = false;
 
-  function renderSeats(snapshot) {
-    busElement.innerHTML = "";
-    const data = snapshot.val() || {};
-    let available = 0, taken = 0, pending = 0;
-
-    for (let i = 1; i <= totalSeats; i++) {
-      const seatId = `seat${i}`;
-      const status = data[seatId];
-      const seatDiv = document.createElement("div");
-      seatDiv.classList.add("seat");
-      seatDiv.textContent = i;
-
-      if (status?.taken) {
-        seatDiv.classList.add("taken");
-        taken++;
-      } else if (selectedSeats.has(i)) {
-        seatDiv.classList.add("selected");
-        pending++;
-      } else {
-        seatDiv.classList.add("green");
-        available++;
-      }
-
-      seatDiv.addEventListener("click", () => {
-        if (status?.taken) return;
-        if (selectedSeats.has(i)) {
-          selectedSeats.delete(i);
-        } else {
-          selectedSeats.add(i);
-        }
-        renderSeats(snapshot);
-      });
-
-      busElement.appendChild(seatDiv);
+  function createSeats() {
+    busContainer.innerHTML = "";
+    for (let i = 1; i <= 20; i++) {
+      const div = document.createElement("div");
+      div.classList.add("seat");
+      div.textContent = i;
+      div.dataset.seat = i;
+      div.addEventListener("click", () => toggleSeat(i, div));
+      busContainer.appendChild(div);
     }
-
-    seatStats.textContent = `Available: ${available} | Pending: ${pending} | Taken: ${taken}`;
   }
 
-  db.ref(busId).on("value", renderSeats);
+  function toggleSeat(seatNum, element) {
+    if (element.classList.contains("taken")) return;
+
+    if (selectedSeats.has(seatNum)) {
+      selectedSeats.delete(seatNum);
+      element.classList.remove("selected");
+    } else {
+      selectedSeats.add(seatNum);
+      element.classList.add("selected");
+    }
+  }
+
+  function updateSeatUI(data) {
+    createSeats();
+    const takenSeats = new Set();
+
+    for (const key in data) {
+      if (key.startsWith("seat") && data[key].taken) {
+        const seatNum = parseInt(key.replace("seat", ""));
+        takenSeats.add(seatNum);
+        const seatDiv = document.querySelector(`.seat[data-seat="${seatNum}"]`);
+        if (seatDiv) seatDiv.classList.add("taken");
+      }
+    }
+
+    seatStats.textContent = `Available: ${20 - takenSeats.size}, Taken: ${takenSeats.size}`;
+  }
+
+  function showLastLocation() {
+    db.ref(`${busId}/lastLocation`).on("value", (snapshot) => {
+      const loc = snapshot.val();
+      if (loc && loc.lat && loc.lng) {
+        lastLocationEl.innerText = `Lat: ${loc.lat.toFixed(5)}, Lng: ${loc.lng.toFixed(5)}`;
+      } else {
+        lastLocationEl.innerText = "No data";
+      }
+    });
+  }
 
   lockBtn.addEventListener("click", async () => {
     if (isUpdating || selectedSeats.size === 0) {
@@ -175,13 +180,11 @@
 
     lockBtn.disabled = true;
     isUpdating = true;
-
     const timestamp = Date.now();
     const updates = {};
 
     selectedSeats.forEach(seat => {
-      const seatKey = `seat${seat}`;
-      updates[`${busId}/${seatKey}`] = { taken: true, timestamp };
+      updates[`${busId}/seat${seat}`] = { taken: true, timestamp };
     });
 
     try {
@@ -191,16 +194,13 @@
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
         await db.ref(`${busId}/lastLocation`).set({ lat, lng, timestamp });
-
-        const link = `https://www.google.com/maps?q=${lat},${lng}`;
-        document.getElementById("last-location-link").innerHTML = `<a href="${link}" target="_blank">Location is here</a>`;
       }, () => {
-        document.getElementById("last-location-link").innerText = "Location unavailable";
+        lastLocationEl.innerText = "Location access denied or failed";
       });
 
       selectedSeats.clear();
     } catch (e) {
-      alert("Error locking seats: " + e.message);
+      alert("Error: " + e.message);
     }
 
     isUpdating = false;
@@ -208,31 +208,20 @@
   });
 
   resetBtn.addEventListener("click", async () => {
-    if (!confirm("Reset all seats to available?")) return;
+    if (!confirm("Are you sure you want to reset all seats?")) return;
     const updates = {};
-    for (let i = 1; i <= totalSeats; i++) {
+    for (let i = 1; i <= 20; i++) {
       updates[`${busId}/seat${i}`] = null;
     }
     await db.ref().update(updates);
-    selectedSeats.clear();
   });
 
-  // Show current last locked location on load
-  function showLastLocation() {
-    db.ref(`${busId}/lastLocation`).on("value", snapshot => {
-      const data = snapshot.val();
-      const el = document.getElementById("last-location-link");
-      if (data && data.lat && data.lng) {
-        const link = `https://www.google.com/maps?q=${data.lat},${data.lng}`;
-        el.innerHTML = `<a href="${link}" target="_blank">Location is here</a>`;
-      } else {
-        el.innerText = "No data";
-      }
-    });
-  }
+  db.ref(busId).on("value", snapshot => {
+    const data = snapshot.val() || {};
+    updateSeatUI(data);
+  });
 
   showLastLocation();
 </script>
-
 </body>
 </html>
