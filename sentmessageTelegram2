@@ -106,7 +106,6 @@
 <button id="resetBtn">Reset All</button>
 
 <script>
-  // ✅ REAL Firebase Config for your app
   const firebaseConfig = {
     apiKey: "AIzaSyA9aQHnSMPnk4-xzpvELktHzHnWGo5LHT0",
     authDomain: "bus-seat-allocation.firebaseapp.com",
@@ -127,8 +126,8 @@
 
   const selectedSeats = new Set();
   let isUpdating = false;
-
   const seatCount = 20;
+
   const busDiv = document.getElementById("bus");
 
   for (let i = 1; i <= seatCount; i++) {
@@ -149,7 +148,6 @@
     busDiv.appendChild(seat);
   }
 
-  // Realtime updates
   db.ref(busId).on("value", snapshot => {
     const data = snapshot.val() || {};
     const stats = { available: 0, pending: 0, taken: 0 };
@@ -214,24 +212,44 @@
     document.getElementById("lockBtn").disabled = false;
   });
 
+  document.getElementById("resetBtn").addEventListener("click", async () => {
+    if (isUpdating) return;
+    const confirmReset = confirm("Are you sure you want to reset all seats?");
+    if (!confirmReset) return;
+
+    isUpdating = true;
+    document.getElementById("resetBtn").disabled = true;
+
+    const updates = {};
+    for (let i = 1; i <= seatCount; i++) {
+      updates[`${busId}/seat${i}`] = null;
+    }
+    updates[`${busId}/pendingSelections`] = null;
+
+    try {
+      await db.ref().update(updates);
+    } catch (e) {
+      alert("Reset failed: " + e.message);
+    }
+
+    isUpdating = false;
+    document.getElementById("resetBtn").disabled = false;
+  });
+
   function sendTelegramNotification(lockedSeats, lat, lng) {
     let message = `🚍 *Bus Seat Locked*\nSeats: ${lockedSeats.join(", ")}\nBy: ${userId}`;
     if (lat && lng) {
-      const mapLink = `https://www.google.com/maps?q=${lat},${lng}`;
-      message += `\n[📍 View Location](${mapLink})`;
+      message += `\n[📍 Location](https://maps.google.com/?q=${lat},${lng})`;
     }
 
-    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-    const payload = {
-      chat_id: TELEGRAM_CHAT_ID,
-      text: message,
-      parse_mode: "Markdown"
-    };
-
-    fetch(url, {
+    fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        chat_id: TELEGRAM_CHAT_ID,
+        text: message,
+        parse_mode: "Markdown"
+      })
     }).catch(err => console.error("Telegram error:", err));
   }
 
@@ -240,8 +258,7 @@
       const data = snapshot.val();
       const el = document.getElementById("last-location-link");
       if (data && data.lat && data.lng) {
-        const link = `https://www.google.com/maps?q=${data.lat},${data.lng}`;
-        el.innerHTML = `<a href="${link}" target="_blank">View on Map</a>`;
+        el.innerHTML = `<a href="https://www.google.com/maps?q=${data.lat},${data.lng}" target="_blank">View on Map</a>`;
       } else {
         el.innerText = "No data";
       }
