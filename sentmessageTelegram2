@@ -57,7 +57,7 @@
 
 <script>
   const firebaseConfig = {
-    apiKey: "AIzaSyA9aQHnSMPnk4-xzpvELktHzHnWGo5LHT0",
+    apiKey: "AIzaSyBxkR6Y4ODLqlnsHNv5ZSS6PcPC4CskiVk",
     authDomain: "bus-seat-allocation.firebaseapp.com",
     databaseURL: "https://bus-seat-allocation-default-rtdb.asia-southeast1.firebasedatabase.app",
     projectId: "bus-seat-allocation",
