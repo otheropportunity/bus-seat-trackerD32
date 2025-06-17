@@ -106,83 +106,150 @@
 <button id="resetBtn">Reset All</button>
 
 <script>
-// ... [Firebase config & setup unchanged]
-
-// Display last known location
-function showLastLocation() {
-  db.ref(`${busId}/lastLocation`).on("value", snapshot => {
-    const data = snapshot.val();
-    const el = document.getElementById("last-location-link");
-    if (data && data.lat && data.lng) {
-      const link = `https://www.google.com/maps?q=${data.lat},${data.lng}`;
-      el.innerHTML = `<a href="${link}" target="_blank">View on Map</a>`;
-    } else {
-      el.innerText = "No data";
-    }
-  });
-}
-
-showLastLocation();
-
-lockBtn.addEventListener("click", async () => {
-  if (isUpdating || selectedSeats.size === 0) {
-    alert("Please select at least one seat to lock.");
-    return;
-  }
-
-  lockBtn.disabled = true;
-  isUpdating = true;
-
-  const timestamp = Date.now();
-  const updates = {};
-
-  selectedSeats.forEach(seat => {
-    const seatKey = `seat${seat}`;
-    updates[`${busId}/${seatKey}`] = { taken: true, timestamp };
-    updates[`${busId}/pendingSelections/${seatKey}`] = null;
-  });
-
-  try {
-    await db.ref().update(updates);
-
-    navigator.geolocation.getCurrentPosition(async (position) => {
-      const lat = position.coords.latitude;
-      const lng = position.coords.longitude;
-      await db.ref(`${busId}/lastLocation`).set({ lat, lng, timestamp });
-      sendTelegramNotification([...selectedSeats], lat, lng);
-    }, () => {
-      sendTelegramNotification([...selectedSeats]);
-    });
-
-    selectedSeats.clear();
-  } catch (e) {
-    alert("Error locking seats: " + e.message);
-  }
-
-  isUpdating = false;
-  lockBtn.disabled = false;
-});
-
-function sendTelegramNotification(lockedSeats, lat, lng) {
-  let message = `🚍 *Bus Seat Locked*\nSeats: ${lockedSeats.join(", ")}\nBy: ${userId}`;
-  if (lat && lng) {
-    const mapLink = `https://www.google.com/maps?q=${lat},${lng}`;
-    message += `\n[📍 View Location](${mapLink})`;
-  }
-
-  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-  const payload = {
-    chat_id: TELEGRAM_CHAT_ID,
-    text: message,
-    parse_mode: "Markdown"
+  // ✅ REAL Firebase Config for your app
+  const firebaseConfig = {
+    apiKey: "AIzaSyA9aQHnSMPnk4-xzpvELktHzHnWGo5LHT0",
+    authDomain: "bus-seat-allocation.firebaseapp.com",
+    databaseURL: "https://bus-seat-allocation-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "bus-seat-allocation",
+    storageBucket: "bus-seat-allocation.appspot.com",
+    messagingSenderId: "1073459975972",
+    appId: "1:1073459975972:web:6e700e9d0fd82fa0276aa4"
   };
 
-  fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  }).catch(err => console.error("Telegram error:", err));
-}
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  const busId = "bus-001";
+  const userId = "tester-001";
+  const TELEGRAM_BOT_TOKEN = "7997261606:AAEnNdEcMlIMZiyiWE9MqkMcrFtm2AUdHyI";
+  const TELEGRAM_CHAT_ID = "6576361445";
+
+  const selectedSeats = new Set();
+  let isUpdating = false;
+
+  const seatCount = 20;
+  const busDiv = document.getElementById("bus");
+
+  for (let i = 1; i <= seatCount; i++) {
+    const seat = document.createElement("div");
+    seat.classList.add("seat");
+    seat.innerText = i;
+    seat.id = `seat${i}`;
+    seat.addEventListener("click", () => {
+      if (seat.classList.contains("taken") || seat.classList.contains("pending-other")) return;
+      if (selectedSeats.has(i)) {
+        selectedSeats.delete(i);
+        seat.classList.remove("selected");
+      } else {
+        selectedSeats.add(i);
+        seat.classList.add("selected");
+      }
+    });
+    busDiv.appendChild(seat);
+  }
+
+  // Realtime updates
+  db.ref(busId).on("value", snapshot => {
+    const data = snapshot.val() || {};
+    const stats = { available: 0, pending: 0, taken: 0 };
+
+    for (let i = 1; i <= seatCount; i++) {
+      const seatEl = document.getElementById(`seat${i}`);
+      const key = `seat${i}`;
+      seatEl.classList.remove("taken", "selected", "pending-other");
+      if (selectedSeats.has(i)) seatEl.classList.add("selected");
+
+      if (data[key]?.taken) {
+        seatEl.classList.add("taken");
+        stats.taken++;
+      } else if (data.pendingSelections?.[key]) {
+        seatEl.classList.add("pending-other");
+        stats.pending++;
+      } else {
+        stats.available++;
+      }
+    }
+
+    document.getElementById("seat-stats").innerText =
+      `Available: ${stats.available}, Pending: ${stats.pending}, Taken: ${stats.taken}`;
+  });
+
+  document.getElementById("lockBtn").addEventListener("click", async () => {
+    if (isUpdating || selectedSeats.size === 0) {
+      alert("Please select at least one seat to lock.");
+      return;
+    }
+
+    document.getElementById("lockBtn").disabled = true;
+    isUpdating = true;
+
+    const timestamp = Date.now();
+    const updates = {};
+
+    selectedSeats.forEach(seat => {
+      const seatKey = `seat${seat}`;
+      updates[`${busId}/${seatKey}`] = { taken: true, timestamp };
+      updates[`${busId}/pendingSelections/${seatKey}`] = null;
+    });
+
+    try {
+      await db.ref().update(updates);
+
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        await db.ref(`${busId}/lastLocation`).set({ lat, lng, timestamp });
+        sendTelegramNotification([...selectedSeats], lat, lng);
+      }, () => {
+        sendTelegramNotification([...selectedSeats]);
+      });
+
+      selectedSeats.clear();
+    } catch (e) {
+      alert("Error locking seats: " + e.message);
+    }
+
+    isUpdating = false;
+    document.getElementById("lockBtn").disabled = false;
+  });
+
+  function sendTelegramNotification(lockedSeats, lat, lng) {
+    let message = `🚍 *Bus Seat Locked*\nSeats: ${lockedSeats.join(", ")}\nBy: ${userId}`;
+    if (lat && lng) {
+      const mapLink = `https://www.google.com/maps?q=${lat},${lng}`;
+      message += `\n[📍 View Location](${mapLink})`;
+    }
+
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+    const payload = {
+      chat_id: TELEGRAM_CHAT_ID,
+      text: message,
+      parse_mode: "Markdown"
+    };
+
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).catch(err => console.error("Telegram error:", err));
+  }
+
+  function showLastLocation() {
+    db.ref(`${busId}/lastLocation`).on("value", snapshot => {
+      const data = snapshot.val();
+      const el = document.getElementById("last-location-link");
+      if (data && data.lat && data.lng) {
+        const link = `https://www.google.com/maps?q=${data.lat},${data.lng}`;
+        el.innerHTML = `<a href="${link}" target="_blank">View on Map</a>`;
+      } else {
+        el.innerText = "No data";
+      }
+    });
+  }
+
+  showLastLocation();
 </script>
+
 </body>
 </html>
