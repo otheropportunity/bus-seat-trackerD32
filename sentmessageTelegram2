@@ -106,80 +106,74 @@
 <button id="resetBtn">Reset All</button>
 
 <script>
+  // ✅ Firebase config
   const firebaseConfig = {
     apiKey: "AIzaSyA9aQHnSMPnk4-xzpvELktHzHnWGo5LHT0",
     authDomain: "bus-seat-allocation.firebaseapp.com",
     databaseURL: "https://bus-seat-allocation-default-rtdb.asia-southeast1.firebasedatabase.app",
     projectId: "bus-seat-allocation",
-    storageBucket: "bus-seat-allocation.appspot.com",
-    messagingSenderId: "1073459975972",
-    appId: "1:1073459975972:web:6e700e9d0fd82fa0276aa4"
   };
 
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
 
   const busId = "bus-001";
-  const userId = "tester-001";
-  const TELEGRAM_BOT_TOKEN = "7997261606:AAEnNdEcMlIMZiyiWE9MqkMcrFtm2AUdHyI";
-  const TELEGRAM_CHAT_ID = "6576361445";
-
+  const totalSeats = 20;
+  const busElement = document.getElementById("bus");
+  const seatStats = document.getElementById("seat-stats");
+  const lockBtn = document.getElementById("lockBtn");
+  const resetBtn = document.getElementById("resetBtn");
   const selectedSeats = new Set();
   let isUpdating = false;
-  const seatCount = 20;
 
-  const busDiv = document.getElementById("bus");
-
-  for (let i = 1; i <= seatCount; i++) {
-    const seat = document.createElement("div");
-    seat.classList.add("seat");
-    seat.innerText = i;
-    seat.id = `seat${i}`;
-    seat.addEventListener("click", () => {
-      if (seat.classList.contains("taken") || seat.classList.contains("pending-other")) return;
-      if (selectedSeats.has(i)) {
-        selectedSeats.delete(i);
-        seat.classList.remove("selected");
-      } else {
-        selectedSeats.add(i);
-        seat.classList.add("selected");
-      }
-    });
-    busDiv.appendChild(seat);
-  }
-
-  db.ref(busId).on("value", snapshot => {
+  function renderSeats(snapshot) {
+    busElement.innerHTML = "";
     const data = snapshot.val() || {};
-    const stats = { available: 0, pending: 0, taken: 0 };
+    let available = 0, taken = 0, pending = 0;
 
-    for (let i = 1; i <= seatCount; i++) {
-      const seatEl = document.getElementById(`seat${i}`);
-      const key = `seat${i}`;
-      seatEl.classList.remove("taken", "selected", "pending-other");
-      if (selectedSeats.has(i)) seatEl.classList.add("selected");
+    for (let i = 1; i <= totalSeats; i++) {
+      const seatId = `seat${i}`;
+      const status = data[seatId];
+      const seatDiv = document.createElement("div");
+      seatDiv.classList.add("seat");
+      seatDiv.textContent = i;
 
-      if (data[key]?.taken) {
-        seatEl.classList.add("taken");
-        stats.taken++;
-      } else if (data.pendingSelections?.[key]) {
-        seatEl.classList.add("pending-other");
-        stats.pending++;
+      if (status?.taken) {
+        seatDiv.classList.add("taken");
+        taken++;
+      } else if (selectedSeats.has(i)) {
+        seatDiv.classList.add("selected");
+        pending++;
       } else {
-        stats.available++;
+        seatDiv.classList.add("green");
+        available++;
       }
+
+      seatDiv.addEventListener("click", () => {
+        if (status?.taken) return;
+        if (selectedSeats.has(i)) {
+          selectedSeats.delete(i);
+        } else {
+          selectedSeats.add(i);
+        }
+        renderSeats(snapshot);
+      });
+
+      busElement.appendChild(seatDiv);
     }
 
-    document.getElementById("seat-stats").innerText =
-      `Available: ${stats.available}, Pending: ${stats.pending}, Taken: ${stats.taken}`;
-  });
+    seatStats.textContent = `Available: ${available} | Pending: ${pending} | Taken: ${taken}`;
+  }
 
-  document.getElementById("lockBtn").addEventListener("click", async () => {
+  db.ref(busId).on("value", renderSeats);
+
+  lockBtn.addEventListener("click", async () => {
     if (isUpdating || selectedSeats.size === 0) {
       alert("Please select at least one seat to lock.");
       return;
     }
 
-    document.getElementById("lockBtn").disabled = true;
+    lockBtn.disabled = true;
     isUpdating = true;
 
     const timestamp = Date.now();
@@ -188,7 +182,6 @@
     selectedSeats.forEach(seat => {
       const seatKey = `seat${seat}`;
       updates[`${busId}/${seatKey}`] = { taken: true, timestamp };
-      updates[`${busId}/pendingSelections/${seatKey}`] = null;
     });
 
     try {
@@ -198,9 +191,11 @@
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
         await db.ref(`${busId}/lastLocation`).set({ lat, lng, timestamp });
-        sendTelegramNotification([...selectedSeats], lat, lng);
+
+        const link = `https://www.google.com/maps?q=${lat},${lng}`;
+        document.getElementById("last-location-link").innerHTML = `<a href="${link}" target="_blank">Location is here</a>`;
       }, () => {
-        sendTelegramNotification([...selectedSeats]);
+        document.getElementById("last-location-link").innerText = "Location unavailable";
       });
 
       selectedSeats.clear();
@@ -209,56 +204,27 @@
     }
 
     isUpdating = false;
-    document.getElementById("lockBtn").disabled = false;
+    lockBtn.disabled = false;
   });
 
-  document.getElementById("resetBtn").addEventListener("click", async () => {
-    if (isUpdating) return;
-    const confirmReset = confirm("Are you sure you want to reset all seats?");
-    if (!confirmReset) return;
-
-    isUpdating = true;
-    document.getElementById("resetBtn").disabled = true;
-
+  resetBtn.addEventListener("click", async () => {
+    if (!confirm("Reset all seats to available?")) return;
     const updates = {};
-    for (let i = 1; i <= seatCount; i++) {
+    for (let i = 1; i <= totalSeats; i++) {
       updates[`${busId}/seat${i}`] = null;
     }
-    updates[`${busId}/pendingSelections`] = null;
-
-    try {
-      await db.ref().update(updates);
-    } catch (e) {
-      alert("Reset failed: " + e.message);
-    }
-
-    isUpdating = false;
-    document.getElementById("resetBtn").disabled = false;
+    await db.ref().update(updates);
+    selectedSeats.clear();
   });
 
-  function sendTelegramNotification(lockedSeats, lat, lng) {
-    let message = `🚍 *Bus Seat Locked*\nSeats: ${lockedSeats.join(", ")}\nBy: ${userId}`;
-    if (lat && lng) {
-      message += `\n[📍 Location](https://maps.google.com/?q=${lat},${lng})`;
-    }
-
-    fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
-        text: message,
-        parse_mode: "Markdown"
-      })
-    }).catch(err => console.error("Telegram error:", err));
-  }
-
+  // Show current last locked location on load
   function showLastLocation() {
     db.ref(`${busId}/lastLocation`).on("value", snapshot => {
       const data = snapshot.val();
       const el = document.getElementById("last-location-link");
       if (data && data.lat && data.lng) {
-        el.innerHTML = `<a href="https://www.google.com/maps?q=${data.lat},${data.lng}" target="_blank">View on Map</a>`;
+        const link = `https://www.google.com/maps?q=${data.lat},${data.lng}`;
+        el.innerHTML = `<a href="${link}" target="_blank">Location is here</a>`;
       } else {
         el.innerText = "No data";
       }
