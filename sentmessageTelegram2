@@ -12,23 +12,6 @@
       background: #f0f4f8;
       padding: 20px;
     }
-    h1 { margin-bottom: 10px; }
-    #last-location { font-size: 18px; margin-bottom: 10px; color: #333; }
-    #seat-stats, #legend {
-      font-size: 18px;
-      margin-bottom: 15px;
-    }
-    .legend-box { display: inline-flex; align-items: center; margin: 0 10px; }
-    .color-box {
-      width: 20px;
-      height: 20px;
-      border-radius: 4px;
-      margin-right: 5px;
-      display: inline-block;
-    }
-    .green { background-color: #28a745; }
-    .yellow { background-color: #ffc107; }
-    .red { background-color: #dc3545; }
     .bus {
       display: grid;
       grid-template-columns: repeat(5, 80px);
@@ -36,192 +19,126 @@
       justify-content: center;
       margin-bottom: 20px;
     }
-    .seat, .label {
+    .seat {
       width: 80px;
       height: 80px;
+      background-color: #28a745;
       border-radius: 10px;
+      color: white;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: bold;
       font-size: 16px;
-      user-select: none;
-      transition: background-color 0.3s ease;
-    }
-    .seat {
-      background-color: #28a745;
-      color: white;
       cursor: pointer;
     }
-    .seat.selected {
-      background-color: #ffc107;
-      color: black;
-    }
-    .seat.taken {
-      background-color: #dc3545;
-      color: white;
-      cursor: not-allowed;
-    }
-    .label {
-      background-color: #ccc;
-      cursor: default;
-    }
+    .taken { background-color: #dc3545; cursor: not-allowed; }
+    .selected { background-color: #ffc107; color: black; }
     #lockBtn, #resetBtn {
       padding: 10px 20px;
-      font-size: 16px;
       margin: 10px;
-      background-color: #007bff;
-      color: white;
-      border: none;
-      border-radius: 6px;
+      font-size: 16px;
       cursor: pointer;
-      user-select: none;
     }
-    #resetBtn {
-      background-color: #dc3545;
-    }
-    #lockBtn:disabled, #resetBtn:disabled {
-      background-color: #6c757d;
-      cursor: not-allowed;
+    #last-location {
+      font-size: 18px;
+      margin: 15px 0;
+      color: #333;
     }
   </style>
 </head>
 <body>
 
 <h1>🚌 Bus Seat Availability Tracker</h1>
-<div id="last-location"><strong>Last Locked Seat Location:</strong> <span id="last-location-link">Fetching...</span></div>
-<div id="seat-stats">Loading seat data...</div>
-<div id="legend">
-  <span class="legend-box"><span class="color-box green"></span> Available</span>
-  <span class="legend-box"><span class="color-box yellow"></span> Pending</span>
-  <span class="legend-box"><span class="color-box red"></span> Taken</span>
-</div>
+<div id="last-location">Last Locked Seat Location: <span id="loc-info">Loading...</span></div>
+
 <div class="bus" id="bus"></div>
 <button id="lockBtn">Lock Seat</button>
-<button id="resetBtn">Reset All</button>
 
 <script>
   const firebaseConfig = {
     apiKey: "AIzaSyA9aQHnSMPnk4-xzpvELktHzHnWGo5LHT0",
     authDomain: "bus-seat-allocation.firebaseapp.com",
     databaseURL: "https://bus-seat-allocation-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "bus-seat-allocation"
+    projectId: "bus-seat-allocation",
   };
-
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
-  const busId = "bus-001";
 
-  const busContainer = document.getElementById("bus");
-  const seatStats = document.getElementById("seat-stats");
-  const lastLocationEl = document.getElementById("last-location-link");
+  const busId = "bus-001";
+  const busEl = document.getElementById("bus");
+  const locInfo = document.getElementById("loc-info");
   const lockBtn = document.getElementById("lockBtn");
-  const resetBtn = document.getElementById("resetBtn");
 
   let selectedSeats = new Set();
-  let isUpdating = false;
 
-  function createSeats() {
-    busContainer.innerHTML = "";
-    for (let i = 1; i <= 20; i++) {
-      const div = document.createElement("div");
-      div.classList.add("seat");
-      div.textContent = i;
-      div.dataset.seat = i;
-      div.addEventListener("click", () => toggleSeat(i, div));
-      busContainer.appendChild(div);
-    }
+  // Render seats
+  for (let i = 1; i <= 20; i++) {
+    const seat = document.createElement("div");
+    seat.className = "seat";
+    seat.innerText = i;
+    seat.dataset.seatId = i;
+
+    seat.onclick = () => {
+      if (seat.classList.contains("taken")) return;
+      seat.classList.toggle("selected");
+      const id = seat.dataset.seatId;
+      selectedSeats.has(id) ? selectedSeats.delete(id) : selectedSeats.add(id);
+    };
+
+    busEl.appendChild(seat);
   }
 
-  function toggleSeat(seatNum, element) {
-    if (element.classList.contains("taken")) return;
-
-    if (selectedSeats.has(seatNum)) {
-      selectedSeats.delete(seatNum);
-      element.classList.remove("selected");
-    } else {
-      selectedSeats.add(seatNum);
-      element.classList.add("selected");
-    }
-  }
-
-  function updateSeatUI(data) {
-    createSeats();
-    const takenSeats = new Set();
-
-    for (const key in data) {
-      if (key.startsWith("seat") && data[key].taken) {
-        const seatNum = parseInt(key.replace("seat", ""));
-        takenSeats.add(seatNum);
-        const seatDiv = document.querySelector(`.seat[data-seat="${seatNum}"]`);
-        if (seatDiv) seatDiv.classList.add("taken");
-      }
-    }
-
-    seatStats.textContent = `Available: ${20 - takenSeats.size}, Taken: ${takenSeats.size}`;
-  }
-
-  function showLastLocation() {
-    db.ref(`${busId}/lastLocation`).on("value", (snapshot) => {
-      const loc = snapshot.val();
-      if (loc && loc.lat && loc.lng) {
-        lastLocationEl.innerText = `Lat: ${loc.lat.toFixed(5)}, Lng: ${loc.lng.toFixed(5)}`;
-      } else {
-        lastLocationEl.innerText = "No data";
+  // Load taken seats
+  db.ref(busId).on("value", (snap) => {
+    const data = snap.val();
+    document.querySelectorAll(".seat").forEach(seat => {
+      const id = seat.dataset.seatId;
+      seat.classList.remove("taken");
+      if (data && data[`seat${id}`] && data[`seat${id}`].taken) {
+        seat.classList.add("taken");
+        seat.classList.remove("selected");
       }
     });
-  }
+  });
 
-  lockBtn.addEventListener("click", async () => {
-    if (isUpdating || selectedSeats.size === 0) {
-      alert("Please select at least one seat to lock.");
+  // Show location
+  db.ref(`${busId}/lastLocation`).on("value", (snap) => {
+    const val = snap.val();
+    if (val?.lat && val?.lng) {
+      locInfo.innerText = `Lat: ${val.lat.toFixed(5)}, Lng: ${val.lng.toFixed(5)}`;
+    } else if (val?.error) {
+      locInfo.innerText = `Location denied`;
+    } else {
+      locInfo.innerText = "No data";
+    }
+  });
+
+  // Lock seat + save location
+  lockBtn.onclick = async () => {
+    if (selectedSeats.size === 0) {
+      alert("Select at least one seat");
       return;
     }
 
-    lockBtn.disabled = true;
-    isUpdating = true;
-    const timestamp = Date.now();
     const updates = {};
+    const timestamp = Date.now();
 
     selectedSeats.forEach(seat => {
       updates[`${busId}/seat${seat}`] = { taken: true, timestamp };
     });
 
-    try {
-      await db.ref().update(updates);
-
-      navigator.geolocation.getCurrentPosition(async (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        await db.ref(`${busId}/lastLocation`).set({ lat, lng, timestamp });
-      }, () => {
-        lastLocationEl.innerText = "Location access denied or failed";
-      });
-
-      selectedSeats.clear();
-    } catch (e) {
-      alert("Error: " + e.message);
-    }
-
-    isUpdating = false;
-    lockBtn.disabled = false;
-  });
-
-  resetBtn.addEventListener("click", async () => {
-    if (!confirm("Are you sure you want to reset all seats?")) return;
-    const updates = {};
-    for (let i = 1; i <= 20; i++) {
-      updates[`${busId}/seat${i}`] = null;
-    }
     await db.ref().update(updates);
-  });
+    selectedSeats.clear();
 
-  db.ref(busId).on("value", snapshot => {
-    const data = snapshot.val() || {};
-    updateSeatUI(data);
-  });
-
-  showLastLocation();
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      await db.ref(`${busId}/lastLocation`).set({ lat, lng, timestamp });
+    }, async () => {
+      await db.ref(`${busId}/lastLocation`).set({ lat: null, lng: null, timestamp, error: "Location denied" });
+    });
+  };
 </script>
 </body>
 </html>
