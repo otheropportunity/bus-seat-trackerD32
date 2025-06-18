@@ -72,9 +72,9 @@
       color: white;
       cursor: not-allowed;
     }
-    .seat.disabled {
-      background-color: #ffc107;
-      color: black;
+    .seat.pending {
+      background-color: #fff3cd;
+      color: #856404;
       cursor: not-allowed;
     }
     .label {
@@ -131,6 +131,8 @@
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
   const busId = "bus-001";
+  const deviceId = Math.random().toString(36).substr(2, 9); // unique for each session
+
   const bus = document.getElementById("bus");
   const seatStats = document.getElementById("seat-stats");
   const lockBtn = document.getElementById("lockBtn");
@@ -154,7 +156,6 @@
   ];
 
   const selectedSeats = new Set();
-  let isUpdating = false;
   let total = 0;
 
   seatLayout.forEach(label => {
@@ -176,7 +177,7 @@
 
   function toggleSeat(seatEl) {
     const seatNum = seatEl.dataset.seat;
-    if (seatEl.classList.contains("taken") || seatEl.classList.contains("disabled")) return;
+    if (seatEl.classList.contains("taken") || seatEl.classList.contains("pending")) return;
 
     if (seatEl.classList.contains("selected")) {
       seatEl.classList.remove("selected");
@@ -185,14 +186,14 @@
     } else {
       seatEl.classList.add("selected");
       selectedSeats.add(seatNum);
-      db.ref(`${busId}/seat${seatNum}/pending`).set({ timestamp: Date.now() });
+      db.ref(`${busId}/seat${seatNum}`).update({ pending: deviceId });
     }
     updateSeatStats();
   }
 
   function updateSeatStats() {
     const taken = document.querySelectorAll(".seat.taken").length;
-    const pendingCount = document.querySelectorAll(".seat.selected").length;
+    const pendingCount = document.querySelectorAll(".seat.pending, .seat.selected").length;
     const available = total - taken - pendingCount;
     seatStats.innerHTML = `
       <strong>Total Seats:</strong> ${total} |
@@ -209,15 +210,18 @@
 
       document.querySelectorAll(".seat").forEach(seat => {
         const seatNum = seat.dataset.seat;
-        const seatData = data[`seat${seatNum}`];
-        seat.classList.remove("taken", "selected", "disabled");
+        if (!seatNum) return;
 
-        if (seatData?.taken) {
+        const seatData = data[`seat${seatNum}`] || {};
+        seat.classList.remove("taken", "selected", "pending");
+
+        if (seatData.taken) {
           seat.classList.add("taken");
-        } else if (seatData?.pending) {
-          if (!selectedSeats.has(seatNum)) {
-            seat.classList.add("disabled");
-          }
+        } else if (seatData.pending && seatData.pending !== deviceId) {
+          seat.classList.add("pending");
+        } else if (seatData.pending === deviceId) {
+          seat.classList.add("selected");
+          selectedSeats.add(seatNum);
         }
       });
 
@@ -230,21 +234,15 @@
       alert("⚠️ Please choose at least one seat before locking.");
       return;
     }
-    if (isUpdating) return;
-    isUpdating = true;
-    lockBtn.disabled = true;
 
     const timestamp = Date.now();
     const updates = {};
-
     selectedSeats.forEach(seat => {
       updates[`${busId}/seat${seat}`] = { taken: true, timestamp };
     });
 
     try {
       await db.ref().update(updates);
-      selectedSeats.clear();
-
       navigator.geolocation.getCurrentPosition(async (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
@@ -253,21 +251,22 @@
       }, () => {
         locationText.innerText = "Location not available.";
       });
+      selectedSeats.clear();
     } catch (err) {
       alert("Error: " + err.message);
     }
-
-    isUpdating = false;
-    lockBtn.disabled = false;
   });
 
   resetBtn.addEventListener("click", async () => {
-    const pwd = prompt("Enter password to reset:");
-    if (pwd !== "D32BusRoyalCinere") return alert("Incorrect password.");
+    const password = prompt("Enter reset password:");
+    if (password !== "D32BusRoyalCinere") {
+      alert("Wrong password!");
+      return;
+    }
 
     const updates = {};
     for (let i = 1; i <= 30; i++) {
-      updates[`${busId}/seat${i}`] = { taken: false };
+      updates[`${busId}/seat${i}`] = null;
     }
     await db.ref().update(updates);
   });
@@ -281,6 +280,7 @@
         locationText.innerText = `Lat: ${lat}, Lng: ${lng}`;
         const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
         window.open(mapsUrl, "_blank");
+        window.scrollTo({ top: locationText.offsetTop - 40, behavior: "smooth" });
       } else {
         locationText.innerText = "No location data available.";
       }
