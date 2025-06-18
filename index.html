@@ -72,6 +72,11 @@
       color: white;
       cursor: not-allowed;
     }
+    .seat.disabled {
+      background-color: #ffc107;
+      color: black;
+      cursor: not-allowed;
+    }
     .label {
       background-color: #ccc;
       cursor: default;
@@ -154,7 +159,6 @@
 
   seatLayout.forEach(label => {
     const div = document.createElement("div");
-
     if (!label) {
       div.className = "seat blank";
     } else if (["Driver", "DOOR", "TAPIN/OUT"].includes(label)) {
@@ -165,34 +169,23 @@
       div.innerText = label;
       div.dataset.seat = label;
       total++;
-
-      div.addEventListener("click", () => {
-        const seatNum = div.dataset.seat;
-        if (div.classList.contains("taken")) return;
-
-        // Prevent selecting others’ pending seat
-        if (div.classList.contains("selected") && !selectedSeats.has(seatNum)) {
-          alert("⛔ This seat is currently being selected by another passenger.");
-          return;
-        }
-
-        toggleSeat(div);
-      });
+      div.addEventListener("click", () => toggleSeat(div));
     }
-
     bus.appendChild(div);
   });
 
   function toggleSeat(seatEl) {
     const seatNum = seatEl.dataset.seat;
-    if (seatEl.classList.contains("taken")) return;
+    if (seatEl.classList.contains("taken") || seatEl.classList.contains("disabled")) return;
 
     if (seatEl.classList.contains("selected")) {
       seatEl.classList.remove("selected");
       selectedSeats.delete(seatNum);
+      db.ref(`${busId}/seat${seatNum}/pending`).remove();
     } else {
       seatEl.classList.add("selected");
       selectedSeats.add(seatNum);
+      db.ref(`${busId}/seat${seatNum}/pending`).set({ timestamp: Date.now() });
     }
     updateSeatStats();
   }
@@ -217,9 +210,14 @@
       document.querySelectorAll(".seat").forEach(seat => {
         const seatNum = seat.dataset.seat;
         const seatData = data[`seat${seatNum}`];
-        seat.classList.remove("taken", "selected");
+        seat.classList.remove("taken", "selected", "disabled");
+
         if (seatData?.taken) {
           seat.classList.add("taken");
+        } else if (seatData?.pending) {
+          if (!selectedSeats.has(seatNum)) {
+            seat.classList.add("disabled");
+          }
         }
       });
 
@@ -245,6 +243,8 @@
 
     try {
       await db.ref().update(updates);
+      selectedSeats.clear();
+
       navigator.geolocation.getCurrentPosition(async (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
@@ -253,7 +253,6 @@
       }, () => {
         locationText.innerText = "Location not available.";
       });
-      selectedSeats.clear();
     } catch (err) {
       alert("Error: " + err.message);
     }
@@ -263,22 +262,12 @@
   });
 
   resetBtn.addEventListener("click", async () => {
-    const resetPassword = "D32BusRoyalCinere";
-    const input = prompt("Enter admin password to reset seats:");
-    if (input !== resetPassword) {
-      alert("❌ Incorrect password. Reset cancelled.");
-      return;
-    }
-    if (!confirm("Are you sure you want to reset all TAKEN seats to available?")) return;
+    const pwd = prompt("Enter password to reset:");
+    if (pwd !== "D32BusRoyalCinere") return alert("Incorrect password.");
 
     const updates = {};
-    const snapshot = await db.ref(busId).once("value");
-    const data = snapshot.val();
     for (let i = 1; i <= 30; i++) {
-      const seatData = data[`seat${i}`];
-      if (seatData?.taken) {
-        updates[`${busId}/seat${i}`] = { taken: false };
-      }
+      updates[`${busId}/seat${i}`] = { taken: false };
     }
     await db.ref().update(updates);
   });
@@ -292,7 +281,6 @@
         locationText.innerText = `Lat: ${lat}, Lng: ${lng}`;
         const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
         window.open(mapsUrl, "_blank");
-        window.scrollTo({ top: locationText.offsetTop - 40, behavior: "smooth" });
       } else {
         locationText.innerText = "No location data available.";
       }
