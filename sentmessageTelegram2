@@ -233,29 +233,33 @@
 
   syncSeats();
 
-  // Mapbox setup
-  mapboxgl.accessToken = "pk.eyJ1Ijoib3RoZXJvcHBvcnR1bml0eTg3IiwiYSI6ImNtYzFxbmxobTAwYm0ya3E4M2VneTE0d3oifQ.f2jA0_g7UmpS0wk2E9uqng";
-  const map = new mapboxgl.Map({
-    container: "map",
-    style: "mapbox://styles/mapbox/streets-v11",
-    center: [106.8, -6.3],
-    zoom: 14
-  });
-
-  const marker = new mapboxgl.Marker({ color: "red" }).setLngLat([106.8, -6.3]).addTo(map);
-
-  db.ref(`${busId}/lastLocation`).on("value", (snapshot) => {
-    const data = snapshot.val();
-    if (data && data.lat && data.lng) {
-      const coords = [data.lng, data.lat];
-      marker.setLngLat(coords);
-      map.setCenter(coords);
-    }
-  });
-
-  // 👇 Fix: Force resize after page load to ensure map renders
+  // Mapbox setup with fix
+  let map, marker;
   window.addEventListener("load", () => {
-    map.resize();
+    mapboxgl.accessToken = "pk.eyJ1Ijoib3RoZXJvcHBvcnR1bml0eTg3IiwiYSI6ImNtYzFxbmxobTAwYm0ya3E4M2VneTE0d3oifQ.f2jA0_g7UmpS0wk2E9uqng";
+    map = new mapboxgl.Map({
+      container: "map",
+      style: "mapbox://styles/mapbox/streets-v11",
+      center: [106.8, -6.3],
+      zoom: 14
+    });
+
+    marker = new mapboxgl.Marker({ color: "red" })
+      .setLngLat([106.8, -6.3])
+      .addTo(map);
+
+    setTimeout(() => {
+      map.resize();
+    }, 500);
+
+    db.ref(`${busId}/lastLocation`).on("value", (snapshot) => {
+      const data = snapshot.val();
+      if (data && data.lat && data.lng) {
+        const coords = [data.lng, data.lat];
+        marker.setLngLat(coords);
+        map.setCenter(coords);
+      }
+    });
   });
 </script>
 
