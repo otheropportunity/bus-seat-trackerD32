@@ -2,31 +2,40 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>🚌 Bus Seat Availability Tracker</title>
+  <title>🚌 Bus Seat Tracker + Live Map</title>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.css" rel="stylesheet" />
   <style>
     body {
       font-family: Arial, sans-serif;
-      text-align: center;
       background: #f0f4f8;
       padding: 20px;
+      text-align: center;
     }
+
     h1 { margin-bottom: 10px; }
-    #locationDisplay {
-      font-size: 18px;
-      margin-bottom: 10px;
-      color: #333;
+
+    #map {
+      width: 100%;
+      height: 400px;
+      margin-bottom: 20px;
+      border-radius: 10px;
+      border: 2px solid #ccc;
     }
+
     #seat-stats, #legend {
       font-size: 18px;
       margin-bottom: 15px;
     }
+
     .legend-box {
       display: inline-flex;
       align-items: center;
       margin: 0 10px;
     }
+
     .color-box {
       width: 20px;
       height: 20px;
@@ -34,9 +43,11 @@
       margin-right: 5px;
       display: inline-block;
     }
+
     .green { background-color: #28a745; }
     .yellow { background-color: #ffc107; }
     .red { background-color: #dc3545; }
+
     .bus {
       display: grid;
       grid-template-columns: repeat(5, 80px);
@@ -44,6 +55,7 @@
       justify-content: center;
       margin-bottom: 20px;
     }
+
     .seat, .label {
       width: 80px;
       height: 80px;
@@ -56,52 +68,48 @@
       user-select: none;
       transition: background-color 0.3s ease;
     }
+
     .seat {
       background-color: #28a745;
       color: white;
       cursor: pointer;
     }
+
     .seat.selected {
       background-color: #ffc107;
       color: black;
     }
+
     .seat.taken {
       background-color: #dc3545;
       color: white;
       cursor: not-allowed;
     }
+
     .label {
       background-color: #ccc;
       cursor: default;
     }
+
     button {
       padding: 10px 20px;
       font-size: 16px;
-      margin: 10px;
+      margin: 5px;
       border: none;
       border-radius: 6px;
       cursor: pointer;
     }
+
     #lockBtn { background-color: #007bff; color: white; }
     #resetBtn { background-color: #dc3545; color: white; }
-    #checkLocationBtn { background-color: #17a2b8; color: white; }
-    #toggleMapBtn { background-color: #6f42c1; color: white; }
-    #mapContainer {
-      display: none;
-      margin-top: 20px;
-    }
-    iframe {
-      width: 100%;
-      height: 400px;
-      border: 1px solid #ccc;
-      border-radius: 10px;
-    }
+    #mapBtn { background-color: #17a2b8; color: white; }
   </style>
 </head>
 <body>
 
-<h1>🚌 Bus Seat Availability Tracker</h1>
-<div id="locationDisplay"><strong>Last Locked Seat Location:</strong> <span id="locationText">Loading...</span></div>
+<h1>🚌 Bus Seat Tracker</h1>
+<div id="map"></div>
+
 <div id="seat-stats">Loading seat data...</div>
 <div id="legend">
   <span class="legend-box"><span class="color-box green"></span> Available</span>
@@ -110,45 +118,26 @@
 </div>
 
 <div class="bus" id="bus"></div>
-
-<!-- Action Buttons -->
 <button id="lockBtn">Lock Seat</button>
 <button id="resetBtn">Reset All</button>
-<button id="checkLocationBtn">Check Location</button>
-<button id="toggleMapBtn">Show Live Bus Map</button>
-
-<!-- Embedded Map Container -->
-<div id="mapContainer">
-  <iframe src="https://otheropportunity.github.io/BusTrackerD32/" allowfullscreen></iframe>
-</div>
+<button id="mapBtn" onclick="window.open('https://otheropportunity.github.io/BusTrackerD32/', '_blank')">Open Full Map</button>
 
 <script>
   const firebaseConfig = {
-    apiKey: "AIzaSyBxkR6Y4ODLqlnsHNv5ZSS6PcPC4CskiVk",
+    apiKey: "AIzaSyA9aQHnSMPnk4-xzpvELktHzHnWGo5LHT0",
     authDomain: "bus-seat-allocation.firebaseapp.com",
     databaseURL: "https://bus-seat-allocation-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "bus-seat-allocation",
-    storageBucket: "bus-seat-allocation.appspot.com",
-    messagingSenderId: "103762500529",
-    appId: "1:103762500529:web:5c05b8517356656b70bb90",
-    measurementId: "G-8SVB0Q44Z0"
+    projectId: "bus-seat-allocation"
   };
 
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
   const busId = "bus-001";
-  const bus = document.getElementById("bus");
-  const seatStats = document.getElementById("seat-stats");
-  const lockBtn = document.getElementById("lockBtn");
-  const resetBtn = document.getElementById("resetBtn");
-  const checkLocationBtn = document.getElementById("checkLocationBtn");
-  const toggleMapBtn = document.getElementById("toggleMapBtn");
-  const mapContainer = document.getElementById("mapContainer");
-  const locationText = document.getElementById("locationText");
-
   const totalSeats = 20;
   const selectedSeats = new Set();
-  let isUpdating = false;
+
+  const bus = document.getElementById("bus");
+  const seatStats = document.getElementById("seat-stats");
 
   for (let i = 1; i <= totalSeats; i++) {
     const seat = document.createElement("div");
@@ -181,52 +170,29 @@
     db.ref(busId).on("value", snapshot => {
       const data = snapshot.val();
       if (!data) return;
-
       document.querySelectorAll(".seat").forEach(seat => {
         const seatNum = seat.dataset.seat;
-        const seatData = data[`seat${seatNum}`];
         seat.classList.remove("taken", "selected");
-        if (seatData?.taken) {
+        if (data[`seat${seatNum}`]?.taken) {
           seat.classList.add("taken");
         }
       });
-
       updateSeatStats();
     });
   }
 
-  lockBtn.addEventListener("click", async () => {
-    if (isUpdating || selectedSeats.size === 0) return;
-    isUpdating = true;
-    lockBtn.disabled = true;
-
+  document.getElementById("lockBtn").addEventListener("click", async () => {
+    if (selectedSeats.size === 0) return;
     const timestamp = Date.now();
     const updates = {};
-
     selectedSeats.forEach(seat => {
       updates[`${busId}/seat${seat}`] = { taken: true, timestamp };
     });
-
-    try {
-      await db.ref().update(updates);
-      navigator.geolocation.getCurrentPosition(async (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        await db.ref(`${busId}/lastLocation`).set({ lat, lng, timestamp });
-        locationText.innerText = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}`;
-      }, () => {
-        locationText.innerText = "Location not available.";
-      });
-      selectedSeats.clear();
-    } catch (err) {
-      alert("Error: " + err.message);
-    }
-
-    isUpdating = false;
-    lockBtn.disabled = false;
+    await db.ref().update(updates);
+    selectedSeats.clear();
   });
 
-  resetBtn.addEventListener("click", async () => {
+  document.getElementById("resetBtn").addEventListener("click", async () => {
     if (!confirm("Reset all seats to available?")) return;
     const updates = {};
     for (let i = 1; i <= totalSeats; i++) {
@@ -235,23 +201,61 @@
     await db.ref().update(updates);
   });
 
-  checkLocationBtn.addEventListener("click", () => {
-    db.ref(`${busId}/lastLocation`).once("value", snapshot => {
-      const data = snapshot.val();
-      if (data && data.lat && data.lng) {
-        locationText.innerText = `Lat: ${data.lat.toFixed(5)}, Lng: ${data.lng.toFixed(5)}`;
-      } else {
-        locationText.innerText = "No location data available.";
-      }
-    });
+  // Map setup
+  mapboxgl.accessToken = "pk.eyJ1Ijoib3RoZXJvcHBvcnR1bml0eTg3IiwiYSI6ImNtYzFxbmxobTAwYm0ya3E4M2VneTE0d3oifQ.f2jA0_g7UmpS0wk2E9uqng";
+  const map = new mapboxgl.Map({
+    container: "map",
+    style: "mapbox://styles/mapbox/streets-v11",
+    center: [106.8, -6.3],
+    zoom: 14
   });
 
-  toggleMapBtn.addEventListener("click", () => {
-    mapContainer.style.display = mapContainer.style.display === "none" ? "block" : "none";
+  const marker = new mapboxgl.Marker({ color: "red" }).setLngLat([106.8, -6.3]).addTo(map);
+  let routeCoordinates = [];
+
+  db.ref("busLocation").on("value", (snapshot) => {
+    const data = snapshot.val();
+    if (data && data.lat && data.lng) {
+      const coords = [data.lng, data.lat];
+      routeCoordinates.push(coords);
+      marker.setLngLat(coords);
+      map.setCenter(coords);
+
+      if (map.getSource("route")) {
+        map.getSource("route").setData({
+          type: "Feature",
+          geometry: {
+            type: "LineString",
+            coordinates: routeCoordinates
+          }
+        });
+      } else {
+        map.addSource("route", {
+          type: "geojson",
+          data: {
+            type: "Feature",
+            geometry: {
+              type: "LineString",
+              coordinates: routeCoordinates
+            }
+          }
+        });
+        map.addLayer({
+          id: "route",
+          type: "line",
+          source: "route",
+          layout: { "line-join": "round", "line-cap": "round" },
+          paint: { "line-color": "#007bff", "line-width": 4 }
+        });
+      }
+    }
+  });
+
+  map.on("load", () => {
+    // Route line will be created on first location update
   });
 
   syncSeats();
 </script>
-
 </body>
 </html>
