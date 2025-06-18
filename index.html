@@ -37,6 +37,8 @@
     .green { background-color: #28a745; }
     .yellow { background-color: #ffc107; }
     .red { background-color: #dc3545; }
+    .grey { background-color: #aaa; }
+
     .bus {
       display: grid;
       grid-template-columns: repeat(5, 80px);
@@ -72,13 +74,17 @@
     }
     .label {
       background-color: #ccc;
-      color: #333;
       cursor: default;
+    }
+    .blank {
+      background-color: #bbb;
+      cursor: default;
+      pointer-events: none;
     }
     button {
       padding: 10px 20px;
       font-size: 16px;
-      margin: 10px 5px;
+      margin: 10px;
       border: none;
       border-radius: 6px;
       cursor: pointer;
@@ -103,7 +109,7 @@
 <button id="lockBtn">Lock Seat</button>
 <button id="resetBtn">Reset All</button>
 <button id="checkLocationBtn">Check Location</button>
-<button id="liveMapBtn" onclick="window.open('https://otheropportunity.github.io/BusTrackerD32/', '_blank')">Live Map</button>
+<button id="liveMapBtn">Live Map</button>
 
 <script>
   const firebaseConfig = {
@@ -125,12 +131,8 @@
   const lockBtn = document.getElementById("lockBtn");
   const resetBtn = document.getElementById("resetBtn");
   const checkLocationBtn = document.getElementById("checkLocationBtn");
+  const liveMapBtn = document.getElementById("liveMapBtn");
   const locationText = document.getElementById("locationText");
-
-  const selectedSeats = new Set();
-  let isUpdating = false;
-  let lastLat = null;
-  let lastLng = null;
 
   const seatLayout = [
     "", "", "", "Driver", "",
@@ -146,17 +148,26 @@
     "26", "27", "28", "29", "30"
   ];
 
-  seatLayout.forEach(cell => {
+  const selectedSeats = new Set();
+  let isUpdating = false;
+  let total = 0;
+
+  seatLayout.forEach(label => {
     const div = document.createElement("div");
-    if (!isNaN(cell) && cell !== "") {
-      div.className = "seat";
-      div.innerText = cell;
-      div.dataset.seat = cell;
-      div.addEventListener("click", () => toggleSeat(div));
-    } else {
+
+    if (!label) {
+      div.className = "seat blank";
+    } else if (["Driver", "DOOR", "TAPIN/OUT"].includes(label)) {
       div.className = "label";
-      div.innerText = cell || "";
+      div.innerText = label;
+    } else {
+      div.className = "seat";
+      div.innerText = label;
+      div.dataset.seat = label;
+      total++;
+      div.addEventListener("click", () => toggleSeat(div));
     }
+
     bus.appendChild(div);
   });
 
@@ -174,8 +185,6 @@
   }
 
   function updateSeatStats() {
-    const seats = document.querySelectorAll(".seat");
-    const total = seats.length;
     const taken = document.querySelectorAll(".seat.taken").length;
     const pendingCount = document.querySelectorAll(".seat.selected").length;
     const available = total - taken - pendingCount;
@@ -201,18 +210,16 @@
         }
       });
 
-      if (data.lastLocation) {
-        lastLat = data.lastLocation.lat;
-        lastLng = data.lastLocation.lng;
-        locationText.innerText = `Lat: ${lastLat.toFixed(5)}, Lng: ${lastLng.toFixed(5)}`;
-      }
-
       updateSeatStats();
     });
   }
 
   lockBtn.addEventListener("click", async () => {
-    if (isUpdating || selectedSeats.size === 0) return;
+    if (selectedSeats.size === 0) {
+      alert("⚠️ Please choose at least one seat before locking.");
+      return;
+    }
+    if (isUpdating) return;
     isUpdating = true;
     lockBtn.disabled = true;
 
@@ -245,20 +252,26 @@
   resetBtn.addEventListener("click", async () => {
     if (!confirm("Reset all seats to available?")) return;
     const updates = {};
-    seatLayout.forEach(cell => {
-      if (!isNaN(cell) && cell !== "") {
-        updates[`${busId}/seat${cell}`] = { taken: false };
-      }
-    });
+    for (let i = 1; i <= 30; i++) {
+      updates[`${busId}/seat${i}`] = { taken: false };
+    }
     await db.ref().update(updates);
   });
 
   checkLocationBtn.addEventListener("click", () => {
-    if (lastLat && lastLng) {
-      window.open(`https://www.google.com/maps?q=${lastLat},${lastLng}`, "_blank");
-    } else {
-      alert("No location data available.");
-    }
+    db.ref(`${busId}/lastLocation`).once("value", snapshot => {
+      const data = snapshot.val();
+      if (data && data.lat && data.lng) {
+        locationText.innerText = `Lat: ${data.lat.toFixed(5)}, Lng: ${data.lng.toFixed(5)}`;
+        window.scrollTo({ top: locationText.offsetTop - 40, behavior: "smooth" });
+      } else {
+        locationText.innerText = "No location data available.";
+      }
+    });
+  });
+
+  liveMapBtn.addEventListener("click", () => {
+    window.open("https://otheropportunity.github.io/BusTrackerD32/", "_blank");
   });
 
   syncSeats();
