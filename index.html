@@ -103,7 +103,7 @@
 <button id="lockBtn">Lock Seat</button>
 <button id="resetBtn">Reset All</button>
 <button id="checkLocationBtn">Check Location</button>
-<button id="liveMapBtn" onclick="window.open('https://www.google.com/maps', '_blank')">Live Map</button>
+<button id="liveMapBtn" onclick="window.open('https://otheropportunity.github.io/BusTrackerD32/', '_blank')">Live Map</button>
 
 <script>
   const firebaseConfig = {
@@ -129,6 +129,8 @@
 
   const selectedSeats = new Set();
   let isUpdating = false;
+  let lastLat = null;
+  let lastLng = null;
 
   const seatLayout = [
     "", "", "", "Driver", "",
@@ -168,12 +170,21 @@
       seatEl.classList.add("selected");
       selectedSeats.add(seatNum);
     }
+    updateSeatStats();
   }
 
   function updateSeatStats() {
+    const seats = document.querySelectorAll(".seat");
+    const total = seats.length;
     const taken = document.querySelectorAll(".seat.taken").length;
-    const available = document.querySelectorAll(".seat").length - taken;
-    seatStats.innerText = `Available: ${available} | Taken: ${taken}`;
+    const pendingCount = document.querySelectorAll(".seat.selected").length;
+    const available = total - taken - pendingCount;
+    seatStats.innerHTML = `
+      <strong>Total Seats:</strong> ${total} |
+      <strong>Available:</strong> ${available} |
+      <strong>Taken:</strong> ${taken} |
+      <strong>Pending:</strong> ${pendingCount}
+    `;
   }
 
   function syncSeats() {
@@ -189,6 +200,12 @@
           seat.classList.add("taken");
         }
       });
+
+      if (data.lastLocation) {
+        lastLat = data.lastLocation.lat;
+        lastLng = data.lastLocation.lng;
+        locationText.innerText = `Lat: ${lastLat.toFixed(5)}, Lng: ${lastLng.toFixed(5)}`;
+      }
 
       updateSeatStats();
     });
@@ -237,14 +254,11 @@
   });
 
   checkLocationBtn.addEventListener("click", () => {
-    db.ref(`${busId}/lastLocation`).once("value", snapshot => {
-      const data = snapshot.val();
-      if (data && data.lat && data.lng) {
-        locationText.innerText = `Lat: ${data.lat.toFixed(5)}, Lng: ${data.lng.toFixed(5)}`;
-      } else {
-        locationText.innerText = "No location data available.";
-      }
-    });
+    if (lastLat && lastLng) {
+      window.open(`https://www.google.com/maps?q=${lastLat},${lastLng}`, "_blank");
+    } else {
+      alert("No location data available.");
+    }
   });
 
   syncSeats();
