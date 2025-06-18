@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>🚌 Bus Seat Tracker + Live Map</title>
+  <title>🚌 Bus Seat Availability Tracker with Live Map</title>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <script src="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.js"></script>
@@ -15,7 +15,12 @@
       padding: 20px;
     }
     h1 { margin-bottom: 10px; }
-    #locationDisplay, #seat-stats, #legend {
+    #locationDisplay {
+      font-size: 18px;
+      margin-bottom: 10px;
+      color: #333;
+    }
+    #seat-stats, #legend {
       font-size: 18px;
       margin-bottom: 15px;
     }
@@ -82,7 +87,12 @@
     #lockBtn { background-color: #007bff; color: white; }
     #resetBtn { background-color: #dc3545; color: white; }
     #checkLocationBtn { background-color: #17a2b8; color: white; }
-    #map { width: 100%; height: 400px; margin-top: 40px; }
+    #map {
+      width: 100%;
+      height: 400px;
+      margin-top: 30px;
+      border-radius: 12px;
+    }
   </style>
 </head>
 <body>
@@ -99,6 +109,8 @@
 <button id="lockBtn">Lock Seat</button>
 <button id="resetBtn">Reset All</button>
 <button id="checkLocationBtn">Check Location</button>
+
+<!-- Map Container -->
 <div id="map"></div>
 
 <script>
@@ -106,17 +118,12 @@
     apiKey: "AIzaSyBxkR6Y4ODLqlnsHNv5ZSS6PcPC4CskiVk",
     authDomain: "bus-seat-allocation.firebaseapp.com",
     databaseURL: "https://bus-seat-allocation-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "bus-seat-allocation",
-    storageBucket: "bus-seat-allocation.firebasestorage.app",
-    messagingSenderId: "103762500529",
-    appId: "1:103762500529:web:5c05b8517356656b70bb90",
-    measurementId: "G-8SVB0Q44Z0"
+    projectId: "bus-seat-allocation"
   };
 
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
   const busId = "bus-001";
-  const userId = "user1";
   const bus = document.getElementById("bus");
   const seatStats = document.getElementById("seat-stats");
   const lockBtn = document.getElementById("lockBtn");
@@ -226,6 +233,7 @@
 
   syncSeats();
 
+  // Mapbox setup
   mapboxgl.accessToken = "pk.eyJ1Ijoib3RoZXJvcHBvcnR1bml0eTg3IiwiYSI6ImNtYzFxbmxobTAwYm0ya3E4M2VneTE0d3oifQ.f2jA0_g7UmpS0wk2E9uqng";
   const map = new mapboxgl.Map({
     container: "map",
@@ -236,13 +244,18 @@
 
   const marker = new mapboxgl.Marker({ color: "red" }).setLngLat([106.8, -6.3]).addTo(map);
 
-  db.ref("busLocation").on("value", (snapshot) => {
+  db.ref(`${busId}/lastLocation`).on("value", (snapshot) => {
     const data = snapshot.val();
     if (data && data.lat && data.lng) {
       const coords = [data.lng, data.lat];
       marker.setLngLat(coords);
       map.setCenter(coords);
     }
+  });
+
+  // 👇 Fix: Force resize after page load to ensure map renders
+  window.addEventListener("load", () => {
+    map.resize();
   });
 </script>
 
