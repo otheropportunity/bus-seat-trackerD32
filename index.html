@@ -214,16 +214,6 @@
     });
   }
 
-  async function fetchLastLocation() {
-    const snapshot = await db.ref(`${busId}/lastLocation`).get();
-    const data = snapshot.val();
-    if (data?.lat && data?.lng) {
-      locationText.innerText = `Lat: ${data.lat.toFixed(5)}, Lng: ${data.lng.toFixed(5)}`;
-    } else {
-      locationText.innerText = "No location data available.";
-    }
-  }
-
   lockBtn.addEventListener("click", async () => {
     if (selectedSeats.size === 0) {
       alert("⚠️ Please choose at least one seat before locking.");
@@ -268,9 +258,20 @@
     await db.ref().update(updates);
   });
 
-  checkLocationBtn.addEventListener("click", async () => {
-    await fetchLastLocation();
-    window.scrollTo({ top: locationText.offsetTop - 40, behavior: "smooth" });
+  checkLocationBtn.addEventListener("click", () => {
+    db.ref(`${busId}/lastLocation`).once("value", snapshot => {
+      const data = snapshot.val();
+      if (data && data.lat && data.lng) {
+        const lat = data.lat.toFixed(5);
+        const lng = data.lng.toFixed(5);
+        locationText.innerText = `Lat: ${lat}, Lng: ${lng}`;
+        const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+        window.open(mapsUrl, "_blank");
+        window.scrollTo({ top: locationText.offsetTop - 40, behavior: "smooth" });
+      } else {
+        locationText.innerText = "No location data available.";
+      }
+    });
   });
 
   liveMapBtn.addEventListener("click", () => {
@@ -278,7 +279,6 @@
   });
 
   syncSeats();
-  fetchLastLocation(); // auto-load location on page load
 </script>
 
 </body>
