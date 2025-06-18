@@ -1,74 +1,117 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Bus Seat Tracker</title>
+  <meta charset="UTF-8" />
+  <title>🚌 Bus Seat Availability Tracker</title>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <style>
-    #bus {
-      display: grid;
-      grid-template-columns: repeat(4, 50px);
-      grid-gap: 10px;
-      margin: 20px;
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #f0f4f8;
+      padding: 20px;
     }
-
-    .seat {
-      width: 50px;
-      height: 50px;
-      background-color: #9f9;
-      display: flex;
-      justify-content: center;
+    h1 { margin-bottom: 10px; }
+    #locationDisplay {
+      font-size: 18px;
+      margin-bottom: 10px;
+      color: #333;
+    }
+    #seat-stats, #legend {
+      font-size: 18px;
+      margin-bottom: 15px;
+    }
+    .legend-box {
+      display: inline-flex;
       align-items: center;
-      cursor: pointer;
+      margin: 0 10px;
+    }
+    .color-box {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      margin-right: 5px;
+      display: inline-block;
+    }
+    .green { background-color: #28a745; }
+    .yellow { background-color: #ffc107; }
+    .red { background-color: #dc3545; }
+    .bus {
+      display: grid;
+      grid-template-columns: repeat(5, 80px);
+      gap: 10px;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    .seat, .label {
+      width: 80px;
+      height: 80px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       font-weight: bold;
-      border-radius: 8px;
-      border: 2px solid #555;
+      font-size: 16px;
+      user-select: none;
+      transition: background-color 0.3s ease;
     }
-
+    .seat {
+      background-color: #28a745;
+      color: white;
+      cursor: pointer;
+    }
     .seat.selected {
-      background-color: yellow;
+      background-color: #ffc107;
+      color: black;
     }
-
     .seat.taken {
-      background-color: red;
+      background-color: #dc3545;
+      color: white;
       cursor: not-allowed;
     }
-
-    #controls {
-      margin: 20px;
+    .label {
+      background-color: #ccc;
+      cursor: default;
     }
-
-    #locationText {
-      margin-top: 10px;
-      font-weight: bold;
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin: 10px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
     }
+    #lockBtn { background-color: #007bff; color: white; }
+    #resetBtn { background-color: #dc3545; color: white; }
+    #checkLocationBtn { background-color: #17a2b8; color: white; }
   </style>
 </head>
 <body>
 
-<h2>🚌 Bus Seat Availability Tracker</h2>
-<div id="seat-stats">Available: 0 | Taken: 0</div>
-
-<div id="bus"></div>
-
-<div id="controls">
-  <button id="lockBtn">Lock Selected Seats</button>
-  <button id="resetBtn">Reset All Seats</button>
-  <button id="checkLocationBtn">📍 Check Last Location</button>
-  <div id="locationText">No location checked yet.</div>
+<h1>🚌 Bus Seat Availability Tracker</h1>
+<div id="locationDisplay"><strong>Last Locked Seat Location:</strong> <span id="locationText">Loading...</span></div>
+<div id="seat-stats">Loading seat data...</div>
+<div id="legend">
+  <span class="legend-box"><span class="color-box green"></span> Available</span>
+  <span class="legend-box"><span class="color-box yellow"></span> Pending</span>
+  <span class="legend-box"><span class="color-box red"></span> Taken</span>
 </div>
-
-<!-- Firebase App -->
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+<div class="bus" id="bus"></div>
+<button id="lockBtn">Lock Seat</button>
+<button id="resetBtn">Reset All</button>
+<button id="checkLocationBtn">Check Location</button>
 
 <script>
   const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT.firebaseapp.com",
-    databaseURL: "https://YOUR_PROJECT.firebaseio.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT.appspot.com",
-    messagingSenderId: "SENDER_ID",
-    appId: "APP_ID"
+    apiKey: "AIzaSyBxkR6Y4ODLqlnsHNv5ZSS6PcPC4CskiVk",
+    authDomain: "bus-seat-allocation.firebaseapp.com",
+    databaseURL: "https://bus-seat-allocation-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "bus-seat-allocation",
+    storageBucket: "bus-seat-allocation.firebasestorage.app",
+    messagingSenderId: "103762500529",
+    appId: "1:103762500529:web:5c05b8517356656b70bb90",
+    measurementId: "G-8SVB0Q44Z0"
   };
 
   firebase.initializeApp(firebaseConfig);
@@ -109,8 +152,8 @@
 
   function updateSeatStats() {
     const taken = document.querySelectorAll(".seat.taken").length;
-    const available = totalSeats - taken;
-    seatStats.innerText = `Available: ${available} | Taken: ${taken}`;
+    const available = document.querySelectorAll(".seat:not(.taken)").length;
+    seatStats.innerText = Available: ${available} | Taken: ${taken};
   }
 
   function syncSeats() {
@@ -120,7 +163,7 @@
 
       document.querySelectorAll(".seat").forEach(seat => {
         const seatNum = seat.dataset.seat;
-        const seatData = data[`seat${seatNum}`];
+        const seatData = data[seat${seatNum}];
         seat.classList.remove("taken", "selected");
         if (seatData?.taken) {
           seat.classList.add("taken");
@@ -140,7 +183,7 @@
     const updates = {};
 
     selectedSeats.forEach(seat => {
-      updates[`${busId}/seat${seat}`] = { taken: true, timestamp };
+      updates[${busId}/seat${seat}] = { taken: true, timestamp };
     });
 
     try {
@@ -148,8 +191,8 @@
       navigator.geolocation.getCurrentPosition(async (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        await db.ref(`${busId}/lastLocation`).set({ lat, lng, timestamp });
-        locationText.innerText = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}`;
+        await db.ref(${busId}/lastLocation).set({ lat, lng, timestamp });
+        locationText.innerText = Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)};
       }, () => {
         locationText.innerText = "Location not available.";
       });
@@ -166,16 +209,16 @@
     if (!confirm("Reset all seats to available?")) return;
     const updates = {};
     for (let i = 1; i <= totalSeats; i++) {
-      updates[`${busId}/seat${i}`] = { taken: false };
+      updates[${busId}/seat${i}] = { taken: false };
     }
     await db.ref().update(updates);
   });
 
   checkLocationBtn.addEventListener("click", () => {
-    db.ref(`${busId}/lastLocation`).once("value", snapshot => {
+    db.ref(${busId}/lastLocation).once("value", snapshot => {
       const data = snapshot.val();
       if (data && data.lat && data.lng) {
-        locationText.innerText = `Lat: ${data.lat.toFixed(5)}, Lng: ${data.lng.toFixed(5)}`;
+        locationText.innerText = Lat: ${data.lat.toFixed(5)}, Lng: ${data.lng.toFixed(5)};
       } else {
         locationText.innerText = "No location data available.";
       }
@@ -187,3 +230,5 @@
 
 </body>
 </html>
+
+
