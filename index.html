@@ -165,7 +165,19 @@
       div.innerText = label;
       div.dataset.seat = label;
       total++;
-      div.addEventListener("click", () => toggleSeat(div));
+
+      div.addEventListener("click", () => {
+        const seatNum = div.dataset.seat;
+        if (div.classList.contains("taken")) return;
+
+        // Prevent selecting others’ pending seat
+        if (div.classList.contains("selected") && !selectedSeats.has(seatNum)) {
+          alert("⛔ This seat is currently being selected by another passenger.");
+          return;
+        }
+
+        toggleSeat(div);
+      });
     }
 
     bus.appendChild(div);
@@ -174,6 +186,7 @@
   function toggleSeat(seatEl) {
     const seatNum = seatEl.dataset.seat;
     if (seatEl.classList.contains("taken")) return;
+
     if (seatEl.classList.contains("selected")) {
       seatEl.classList.remove("selected");
       selectedSeats.delete(seatNum);
@@ -250,10 +263,22 @@
   });
 
   resetBtn.addEventListener("click", async () => {
-    if (!confirm("Reset all seats to available?")) return;
+    const resetPassword = "D32BusRoyalCinere";
+    const input = prompt("Enter admin password to reset seats:");
+    if (input !== resetPassword) {
+      alert("❌ Incorrect password. Reset cancelled.");
+      return;
+    }
+    if (!confirm("Are you sure you want to reset all TAKEN seats to available?")) return;
+
     const updates = {};
+    const snapshot = await db.ref(busId).once("value");
+    const data = snapshot.val();
     for (let i = 1; i <= 30; i++) {
-      updates[`${busId}/seat${i}`] = { taken: false };
+      const seatData = data[`seat${i}`];
+      if (seatData?.taken) {
+        updates[`${busId}/seat${i}`] = { taken: false };
+      }
     }
     await db.ref().update(updates);
   });
