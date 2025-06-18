@@ -15,11 +15,13 @@
       text-align: center;
     }
 
-    h1 { margin-bottom: 10px; }
+    h1 {
+      margin-bottom: 10px;
+    }
 
     #map {
       width: 100%;
-      height: 400px;
+      height: 600px;
       margin-bottom: 20px;
       border-radius: 10px;
       border: 2px solid #ccc;
@@ -44,9 +46,17 @@
       display: inline-block;
     }
 
-    .green { background-color: #28a745; }
-    .yellow { background-color: #ffc107; }
-    .red { background-color: #dc3545; }
+    .green {
+      background-color: #28a745;
+    }
+
+    .yellow {
+      background-color: #ffc107;
+    }
+
+    .red {
+      background-color: #dc3545;
+    }
 
     .bus {
       display: grid;
@@ -100,9 +110,20 @@
       cursor: pointer;
     }
 
-    #lockBtn { background-color: #007bff; color: white; }
-    #resetBtn { background-color: #dc3545; color: white; }
-    #mapBtn { background-color: #17a2b8; color: white; }
+    #lockBtn {
+      background-color: #007bff;
+      color: white;
+    }
+
+    #resetBtn {
+      background-color: #dc3545;
+      color: white;
+    }
+
+    #mapBtn {
+      background-color: #17a2b8;
+      color: white;
+    }
   </style>
 </head>
 <body>
@@ -201,7 +222,6 @@
     await db.ref().update(updates);
   });
 
-  // Map setup
   mapboxgl.accessToken = "pk.eyJ1Ijoib3RoZXJvcHBvcnR1bml0eTg3IiwiYSI6ImNtYzFxbmxobTAwYm0ya3E4M2VneTE0d3oifQ.f2jA0_g7UmpS0wk2E9uqng";
   const map = new mapboxgl.Map({
     container: "map",
@@ -251,10 +271,7 @@
     }
   });
 
-  map.on("load", () => {
-    // Route line will be created on first location update
-  });
-
+  map.on("load", () => {});
   syncSeats();
 </script>
 </body>
