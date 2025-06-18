@@ -8,9 +8,9 @@
   <style>
     body {
       font-family: Arial, sans-serif;
+      text-align: center;
       background: #f0f4f8;
       padding: 20px;
-      text-align: center;
     }
     h1 { margin-bottom: 10px; }
     #locationDisplay {
@@ -72,20 +72,21 @@
     }
     .label {
       background-color: #ccc;
-      color: #000;
+      color: #333;
       cursor: default;
     }
     button {
       padding: 10px 20px;
       font-size: 16px;
-      margin: 10px;
+      margin: 10px 5px;
       border: none;
       border-radius: 6px;
       cursor: pointer;
     }
     #lockBtn { background-color: #007bff; color: white; }
     #resetBtn { background-color: #dc3545; color: white; }
-    #checkLocationBtn, #liveMapBtn { background-color: #17a2b8; color: white; }
+    #checkLocationBtn { background-color: #17a2b8; color: white; }
+    #liveMapBtn { background-color: #28a745; color: white; }
   </style>
 </head>
 <body>
@@ -98,13 +99,11 @@
   <span class="legend-box"><span class="color-box yellow"></span> Pending</span>
   <span class="legend-box"><span class="color-box red"></span> Taken</span>
 </div>
-
 <div class="bus" id="bus"></div>
-
 <button id="lockBtn">Lock Seat</button>
 <button id="resetBtn">Reset All</button>
 <button id="checkLocationBtn">Check Location</button>
-<button id="liveMapBtn">View Live Map</button>
+<button id="liveMapBtn" onclick="window.open('https://www.google.com/maps', '_blank')">Live Map</button>
 
 <script>
   const firebaseConfig = {
@@ -114,7 +113,8 @@
     projectId: "bus-seat-allocation",
     storageBucket: "bus-seat-allocation.appspot.com",
     messagingSenderId: "103762500529",
-    appId: "1:103762500529:web:5c05b8517356656b70bb90"
+    appId: "1:103762500529:web:5c05b8517356656b70bb90",
+    measurementId: "G-8SVB0Q44Z0"
   };
 
   firebase.initializeApp(firebaseConfig);
@@ -125,12 +125,10 @@
   const lockBtn = document.getElementById("lockBtn");
   const resetBtn = document.getElementById("resetBtn");
   const checkLocationBtn = document.getElementById("checkLocationBtn");
-  const liveMapBtn = document.getElementById("liveMapBtn");
   const locationText = document.getElementById("locationText");
 
   const selectedSeats = new Set();
   let isUpdating = false;
-  let lastLat = null, lastLng = null;
 
   const seatLayout = [
     "", "", "", "Driver", "",
@@ -148,14 +146,14 @@
 
   seatLayout.forEach(cell => {
     const div = document.createElement("div");
-    if (!isNaN(cell)) {
+    if (!isNaN(cell) && cell !== "") {
       div.className = "seat";
       div.innerText = cell;
       div.dataset.seat = cell;
       div.addEventListener("click", () => toggleSeat(div));
     } else {
       div.className = "label";
-      div.innerText = cell;
+      div.innerText = cell || "";
     }
     bus.appendChild(div);
   });
@@ -174,7 +172,7 @@
 
   function updateSeatStats() {
     const taken = document.querySelectorAll(".seat.taken").length;
-    const available = document.querySelectorAll(".seat:not(.taken)").length;
+    const available = document.querySelectorAll(".seat").length - taken;
     seatStats.innerText = `Available: ${available} | Taken: ${taken}`;
   }
 
@@ -191,15 +189,6 @@
           seat.classList.add("taken");
         }
       });
-
-      const loc = data.lastLocation;
-      if (loc && loc.lat && loc.lng) {
-        lastLat = loc.lat;
-        lastLng = loc.lng;
-        locationText.innerText = `Lat: ${loc.lat.toFixed(5)}, Lng: ${loc.lng.toFixed(5)}`;
-      } else {
-        locationText.innerText = "No location data available.";
-      }
 
       updateSeatStats();
     });
@@ -224,8 +213,6 @@
         const lng = pos.coords.longitude;
         await db.ref(`${busId}/lastLocation`).set({ lat, lng, timestamp });
         locationText.innerText = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}`;
-        lastLat = lat;
-        lastLng = lng;
       }, () => {
         locationText.innerText = "Location not available.";
       });
@@ -241,26 +228,23 @@
   resetBtn.addEventListener("click", async () => {
     if (!confirm("Reset all seats to available?")) return;
     const updates = {};
-    for (let i = 1; i <= 30; i++) {
-      updates[`${busId}/seat${i}`] = { taken: false };
-    }
+    seatLayout.forEach(cell => {
+      if (!isNaN(cell) && cell !== "") {
+        updates[`${busId}/seat${cell}`] = { taken: false };
+      }
+    });
     await db.ref().update(updates);
   });
 
   checkLocationBtn.addEventListener("click", () => {
-    if (lastLat && lastLng) {
-      locationText.innerText = `Lat: ${lastLat.toFixed(5)}, Lng: ${lastLng.toFixed(5)}`;
-    } else {
-      locationText.innerText = "No location data available.";
-    }
-  });
-
-  liveMapBtn.addEventListener("click", () => {
-    if (lastLat && lastLng) {
-      window.open(`https://www.google.com/maps?q=${lastLat},${lastLng}`, "_blank");
-    } else {
-      alert("No location data available to open map.");
-    }
+    db.ref(`${busId}/lastLocation`).once("value", snapshot => {
+      const data = snapshot.val();
+      if (data && data.lat && data.lng) {
+        locationText.innerText = `Lat: ${data.lat.toFixed(5)}, Lng: ${data.lng.toFixed(5)}`;
+      } else {
+        locationText.innerText = "No location data available.";
+      }
+    });
   });
 
   syncSeats();
